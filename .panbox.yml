@@ -1,0 +1,7 @@
+schema_version: "1.0"
+modules: [vaccin, enetron]
+exclude: [vendor, node_modules, .git]
+branch_mapping:
+  default: main
+baseline_ref: origin/main
+# Server policy always wins. No credentials in this file.

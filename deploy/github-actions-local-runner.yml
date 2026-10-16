@@ -1,0 +1,22 @@
+# Copy into .github/workflows/panbox.yml in a repository being scanned.
+# Use an isolated, protected self-hosted runner on the PANBOX LAN.
+# Repository variable: PANBOX_REPOSITORY_ID. Secret: PANBOX_TOKEN.
+name: PANBOX scan
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: [self-hosted, panbox-local]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run PANBOX
+        env:
+          PANBOX_TOKEN: ${{ secrets.PANBOX_TOKEN }}
+          PANBOX_REPOSITORY_ID: ${{ vars.PANBOX_REPOSITORY_ID }}
+        run: panbox go --server http://127.0.0.1:8080 --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"

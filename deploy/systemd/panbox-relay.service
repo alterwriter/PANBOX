@@ -1,0 +1,19 @@
+[Unit]
+Description=PANBOX GitLab artifact pull
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=panbox-relay
+Group=panbox-relay
+EnvironmentFile=/etc/panbox/relay.env
+StateDirectory=panbox
+ExecStart=/usr/local/bin/panbox relay-pull --project-id ${GITLAB_PROJECT_ID} --repo ${PANBOX_REPOSITORY_ID} --refs ${GITLAB_ALLOWED_REFS} --server http://127.0.0.1:8080 --state /var/lib/panbox/relay-state.json
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

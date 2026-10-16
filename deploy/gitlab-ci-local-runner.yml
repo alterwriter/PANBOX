@@ -1,0 +1,10 @@
+# Copy this job into .gitlab-ci.yml. Use a protected shell runner in an
+# isolated VM on the PANBOX LAN, with only the PANBOX agent installed.
+# Keep PANBOX_TOKEN a masked, protected CI variable. Protect runner and branches.
+panbox_scan:
+  stage: test
+  tags: [panbox-local]
+  script:
+    - panbox go --server http://127.0.0.1:8080 --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$CI_COMMIT_REF_NAME" --commit "$CI_COMMIT_SHA" --base-sha "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}"
+  rules:
+    - if: '$CI_COMMIT_REF_PROTECTED == "true"'

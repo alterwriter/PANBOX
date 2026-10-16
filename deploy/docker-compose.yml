@@ -1,0 +1,49 @@
+name: panbox
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: panbox
+      POSTGRES_USER: panbox
+      POSTGRES_PASSWORD: ${PANBOX_DB_PASSWORD:?set PANBOX_DB_PASSWORD}
+    volumes:
+      - panbox_db:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${PANBOX_DB_HOST_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U panbox -d panbox"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+  server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://panbox:${PANBOX_DB_PASSWORD:?set PANBOX_DB_PASSWORD}@db:5432/panbox?sslmode=disable
+      PANBOX_BOOTSTRAP_EMAIL: ${PANBOX_BOOTSTRAP_EMAIL:?set PANBOX_BOOTSTRAP_EMAIL}
+      PANBOX_BOOTSTRAP_PASSWORD: ${PANBOX_BOOTSTRAP_PASSWORD:?set PANBOX_BOOTSTRAP_PASSWORD}
+      PANBOX_ADDR: 0.0.0.0:8080
+      PANBOX_WEB_DIR: web/dist
+      PANBOX_SECURE_COOKIE: ${PANBOX_SECURE_COOKIE:-false}
+    ports:
+      - "127.0.0.1:${PANBOX_HOST_PORT:-8080}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+volumes:
+  panbox_db:

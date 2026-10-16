@@ -1,0 +1,10 @@
+.env
+.env.local
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+bin/
+*.exe
+*.test
+coverage.out
+tmp/
