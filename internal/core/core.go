@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"path/filepath"
+	"path"
 	"strings"
 )
 
@@ -32,10 +32,10 @@ func Secret(prefix string) string {
 
 func Hash(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
 
-func Fingerprint(module, rule, path, context string) string {
-	path = strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+func Fingerprint(module, rule, filePath, context string) string {
+	filePath = strings.ToLower(path.Clean(strings.ReplaceAll(filePath, "\\", "/")))
 	context = strings.Join(strings.Fields(context), " ")
-	return Hash(strings.ToLower(module) + "\x00" + rule + "\x00" + path + "\x00" + context)
+	return Hash(strings.ToLower(module) + "\x00" + rule + "\x00" + filePath + "\x00" + context)
 }
 
 func ValidSeverity(s string) bool { _, ok := Severities[s]; return ok }

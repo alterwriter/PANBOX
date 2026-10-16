@@ -45,4 +45,4 @@ jobs:
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --prerelease --title "PANBOX agent $GITHUB_REF_NAME" --notes-file docs/release-notes-v0.1.0-alpha.1.md
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --prerelease --title "PANBOX agent $GITHUB_REF_NAME" --notes-file docs/release-notes.md

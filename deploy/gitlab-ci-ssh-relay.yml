@@ -2,7 +2,7 @@
 # tunnel to the same relay. The scan token never resides on the relay.
 panbox_scan:
   stage: test
-  image: your-registry/panbox-agent:0.1.0-alpha.1
+  image: your-registry/panbox-agent:<version>
   variables:
     PANBOX_SERVER: http://127.0.0.1:18080
   before_script:
