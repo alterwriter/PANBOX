@@ -6,6 +6,19 @@ Guide version: 0.1 (pilot, 17 October 2026). PANBOX is a self-hosted AppSec cont
 
 PANBOX receives native scans from the `panbox` agent, stores snapshots per repository and branch, evaluates a quality gate, and presents posture, findings, scan history, technical exports, RBAC, and audit events. A Go server serves the API and React UI; PostgreSQL stores state. The agent runs on developer machines or CI runners, not in the dashboard container.
 
+High-level infrastructure and data flow:
+
+```text
+Git host + CI --checkout--> protected runner + PANBOX agent
+                                  |-- VACCIN: source rules
+                                  |-- ENETRON: pinned packages --HTTPS--> OSV data
+                                  +-- findings bundle + scan key --> PANBOX Go API
+                                                               |--> PostgreSQL
+Operator browser --loopback/HTTPS--> React UI -----------------+
+```
+
+The private PANBOX host serves the UI and API and stores data in PostgreSQL; it does not scan source code. The runner sends package names and versions to the advisory API, while the normalized scan bundle goes to PANBOX. A local runner, an SSH relay, or later artifact import can bridge public CI to the private host; only the first two produce a synchronous CI gate. See `docs/architecture.md` for trust boundaries and each network route.
+
 VACCIN is PANBOX's own narrow source-rule engine for selected Python, JavaScript/TypeScript, and Go patterns. ENETRON is PANBOX's own pinned-dependency parser and advisory matcher for npm lockfiles v2/v3, `requirements.txt`, and `go.mod`. ENETRON retrieves vulnerability data from an OSV-compatible HTTPS API; OSV is an advisory source, not a scanner executable. The agent does not execute Semgrep, Grype, or another scanner. Coverage is intentionally limited and does not include broad dataflow analysis.
 
 Flow: Git source -> PANBOX agent -> native rules and dependency matching -> normalized bundle -> PANBOX API -> PostgreSQL -> dashboard and gate decision. A failed or incomplete module stays partial/unverified and does not erase the last successful snapshot. A missing supported manifest marks ENETRON as error rather than passing silently.

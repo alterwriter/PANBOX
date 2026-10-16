@@ -6,6 +6,19 @@ Versi panduan: 0.1 (pilot, 17 Oktober 2026). PANBOX adalah control plane AppSec 
 
 PANBOX menerima hasil pemindaian native dari agent `panbox`, menyimpan snapshot per repositori dan branch, mengevaluasi quality gate, lalu menampilkan posture, findings, riwayat scan, ekspor teknis, RBAC, dan audit. Server Go menyajikan API dan UI React; PostgreSQL menyimpan data. Agent berjalan di mesin pengembang atau runner CI, bukan di container dashboard.
 
+Gambaran infrastruktur dan alur data:
+
+```text
+Host Git + CI --checkout--> runner terlindungi + agent PANBOX
+                                  |-- VACCIN: aturan source
+                                  |-- ENETRON: paket tetap --HTTPS--> data OSV
+                                  +-- bundle temuan + scan key --> API Go PANBOX
+                                                               |--> PostgreSQL
+Browser operator --loopback/HTTPS--> UI React -----------------+
+```
+
+Host PANBOX privat menyajikan UI/API dan menyimpan data di PostgreSQL; server tidak memindai source. Runner mengirim nama dan versi paket ke API advisory, sedangkan bundle hasil dikirim ke PANBOX. Runner lokal, SSH relay, atau impor artifact belakangan dapat menghubungkan CI publik ke host privat; hanya dua jalur pertama menghasilkan gate CI sinkron. Lihat `docs/architecture.md` untuk batas kepercayaan dan setiap jalur jaringan.
+
 VACCIN adalah engine aturan source code buatan PANBOX untuk beberapa pola Python, JavaScript/TypeScript, dan Go. ENETRON adalah parser dependensi versi tetap dan pencocok advisory buatan PANBOX untuk npm lockfile v2/v3, `requirements.txt`, dan `go.mod`. ENETRON mengambil data kerentanan dari API HTTPS yang kompatibel dengan OSV; OSV adalah sumber advisory, bukan executable scanner. Agent tidak menjalankan Semgrep, Grype, atau scanner lain. Cakupan ini sengaja sempit dan belum mencakup analisis dataflow luas.
 
 Alur: source Git -> agent PANBOX -> aturan native dan pencocokan dependensi -> bundle normalisasi -> API PANBOX -> PostgreSQL -> dashboard dan keputusan gate. Modul yang gagal atau tidak lengkap tetap partial/unverified dan tidak menghapus snapshot sukses terakhir. Jika tidak ada manifest yang didukung, ENETRON berstatus error, bukan diam-diam pass.
@@ -14,7 +27,7 @@ Nilai khas saat ini adalah alur single-tenant ringan dengan logika deteksi milik
 
 ## 2. Prasyarat dan sistem operasi
 
-Dashboard: Docker Engine/Desktop dengan Linux containers dan Docker Compose v2. Ini dapat dijalankan di Debian/Linux, macOS, atau Windows; target produksi awal adalah Debian. Host tidak perlu menginstal Node atau Go untuk jalur Docker. CLI dan engine dipasang pada runner/developer host, bukan server dashboard.
+Dashboard: Docker Engine/Desktop dengan Linux containers dan Docker Compose v2. Ini dapat dijalankan di Debian/Linux, macOS, atau Windows; target produksi awal adalah Debian. Host tidak perlu menginstal Node atau Go untuk jalur Docker. Agent dipasang pada runner/developer host, bukan server dashboard.
 
 Port awal: HTTP `8080` dan PostgreSQL `5434`, keduanya diikat ke loopback host oleh Compose. Ubah `PANBOX_HOST_PORT` atau `PANBOX_DB_HOST_PORT` di `.env` bila perlu. Siapkan penyimpanan persisten untuk volume PostgreSQL. `PANBOX_BOOTSTRAP_PASSWORD` hanya dipakai saat database pertama kali dibuat.
 

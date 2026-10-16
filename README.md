@@ -6,6 +6,23 @@ This is an **alpha preview**. VACCIN and ENETRON are first-party PANBOX implemen
 
 RIDER (secrets), TESLA (IaC), AI, MCP, advanced report templates, and broad language/dataflow coverage are not implemented. See the detailed [English guide](docs/product-guide-en.md) and [Indonesian guide](docs/product-guide-id.md).
 
+## How PANBOX works
+
+```mermaid
+flowchart LR
+    SCM[Git host and CI] -->|checkout| AGENT[Protected runner with PANBOX agent]
+    AGENT --> V[VACCIN native source rules]
+    AGENT --> E[ENETRON native dependency matching]
+    E -->|package names and versions over HTTPS| OSV[OSV advisory data]
+    AGENT -->|normalized bundle and repo-bound scan key| API[PANBOX Go API]
+    API --> DB[(PostgreSQL)]
+    BROWSER[Operator browser] --> UI[React dashboard]
+    UI --> API
+    API -->|gate outcome| AGENT
+```
+
+The runner executes detection; the dashboard stores and presents results. PANBOX stays on a private host. A protected runner on its LAN is the simplest synchronous path; an SSH relay also supports a synchronous gate without a public PANBOX IP. Artifact pull/import is asynchronous. See [architecture and trust boundaries](docs/architecture.md) for all three routes and the exact data exchanged.
+
 ## Dashboard setup
 
 Requirements: Docker Compose with Linux containers. On Debian/Linux or macOS:
