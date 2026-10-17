@@ -57,9 +57,10 @@ sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 
 Set `PANBOX_TOKEN` as a protected CI secret and `PANBOX_SERVER` to an API address the runner can reach. The installer selects OS/CPU and checks the downloaded binary against release `SHA256SUMS`; it does not need sudo. See the [English](docs/product-guide-en.md) or [Indonesian](docs/product-guide-id.md) guide for server setup, Windows, and transport choices. To build from source: `go build -o bin/panbox ./cmd/panbox`.
 
-1. In **Repositories**, choose the SCM provider (GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or Other Git) and enter its stable repository ID/path. PANBOX assigns a separate internal repository ID.
-2. Generate a repository-bound **scan key**. Store it as CI secret `PANBOX_TOKEN`, and set `PANBOX_REPOSITORY_ID` to the PANBOX ID. The server checks the token's repository binding; Git remote text is never trusted as authorization.
-3. Run:
+1. Before the first scan, open **Repositories -> Enroll repository**. Choose the SCM provider (GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or Other Git), then enter a display name, stable SCM repository path/ID (for example `alterwriter/PANBOX`), and default branch. This registers a PANBOX record; it does not clone the source. PANBOX does not auto-enroll repositories from a scan.
+2. Copy the generated **PANBOX ID for CI** from the result dialog or Repositories table. This internal ID differs from the SCM path. Set CI variable `PANBOX_REPOSITORY_ID` to the internal ID.
+3. Generate a repository-bound **scan key** from that row, requiring `tokens:manage`, `scans:write`, and repository access. Store the one-time secret as protected CI secret `PANBOX_TOKEN`, and set `PANBOX_SERVER` to an API URL reachable from the runner. The server checks the token's repository binding; Git remote text is never trusted as authorization. Full [English](docs/product-guide-en.md#5-add-only-the-agent-to-ci) and [Indonesian](docs/product-guide-id.md#5-tambahkan-hanya-agent-ke-ci) walkthroughs cover the first scan and validation.
+4. Run:
 
 ```bash
 panbox ready --server http://127.0.0.1:8080
@@ -70,7 +71,7 @@ PANBOX_TOKEN='<scan-key>' panbox go --server http://127.0.0.1:8080 --repo '<inte
 
 For each **online** scan, the agent authenticates `GET /v1/repos/{id}/scan-config`, scans the enabled modules, then uploads one normalized JSON bundle to `POST /v1/scans` with the same scan key in the `Authorization: Bearer` header. The server checks the repository binding, stores the snapshot, evaluates the configured gate threshold, and returns the verdict. The agent maps it to its process exit code. Use **Repositories -> Scan policy** to pause scans, enable modules, or set the gate threshold. `--modules` may narrow the enabled set, but cannot enable a module disabled by the dashboard. Offline scans cannot fetch policy and their later import is checked against the current server policy.
 
-In **Findings**, a user with `findings:recast` can choose **Recast**, set an effective severity (or restore the scanner value), and enter an audited reason. Raw severity never changes; affected historic gate revisions are recalculated against their original thresholds. **Reports** exports the latest complete snapshots as CSV, JSON, or PDF, filtered by repository, branch, scan module, and severity. The PDF is a readable technical summary; CSV/JSON retain the full row data.
+In **Findings**, select **Recast severity** beside a finding rule to set an effective severity (or restore the scanner value) with an audited reason. The button needs `findings:recast` and repository access; if no rows appear, complete the first scan or clear filters. Raw severity never changes; affected historic gate revisions are recalculated against their original thresholds. **Reports** exports the latest complete snapshots as CSV, JSON, or PDF, filtered by repository, branch, scan module, and severity. The PDF is a readable technical summary; CSV/JSON retain the full row data.
 
 For an MCP host, generate a read-only **Access key** with `repos:read`, `scans:read`, and `findings:read` in **Settings & Audit -> API & access keys**. In **Settings & Audit -> MCP setup**, copy the generic stdio configuration for `panbox mcp`; set `PANBOX_SERVER` and `PANBOX_TOKEN` in the MCP host's secret environment. The bridge exposes read-only repositories, findings, and scans and uses the API's RBAC and repository scope.
 

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: PANBOX API
   version: 0.1.0
-  description: Phase 1 self-hosted API. Scan uploads require a repository-bound scan key.
+  description: Phase 1 self-hosted API. Enroll a repository before its first scan; uploads require its PANBOX internal ID and a repository-bound scan key. Scan uploads never auto-enroll.
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -80,6 +80,7 @@ paths:
     get:
       responses: {'200': {description: Authorized repository list}}
     post:
+      description: Enroll an SCM repository before its first scan. The response ID is PANBOX's internal ID, not provider_project_id; use it as PANBOX_REPOSITORY_ID in CI. Requires repos:write.
       requestBody:
         required: true
         content:
@@ -88,6 +89,7 @@ paths:
       responses: {'201': {description: Enrolled repository ID}}
   /v1/repos/{id}/scan-tokens:
     post:
+      description: Generate a one-time scan key bound to the PANBOX internal repository ID. Requires tokens:manage, scans:write, and repository access. Store the returned secret as PANBOX_TOKEN in CI.
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       responses: {'201': {description: Repository-bound one-time scan key}}
   /v1/repos/{id}/scan-config:

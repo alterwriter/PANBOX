@@ -52,9 +52,22 @@ Invoke-RestMethod http://127.0.0.1:8080/readyz
 
 ## 5. Tambahkan hanya agent ke CI
 
-**Atur scan policy lebih dulu:** di Repositories -> Scan policy, pilih modul yang diizinkan, ambang gate, dan apakah scan baru aktif. Dashboard PANBOX mengontrol scan online berikutnya, tetapi tidak menyalakan pipeline SCM.
+**Model onboarding:** PANBOX memakai alur daftarkan repo dahulu, seperti project key pada SonarQube. Scan pertama tidak otomatis membuat repo atau scan key. Ini membuat identitas tujuan dan izin upload ditetapkan sebelum CI mengirim data. Pendaftaran ini hanya membuat catatan di PANBOX; PANBOX tidak meng-clone repo dan tidak perlu kredensial SCM pada formulir tersebut.
 
-**Sekali di UI PANBOX:** Repositories -> daftarkan repo GitHub, GitLab, Bitbucket, Azure Repos, Gitea, atau Other Git memakai ID/path stabil dari providernya. Salin **ID repo internal PANBOX**. Buat **scan key** repo itu. Simpan sebagai secret CI terlindungi `PANBOX_TOKEN`; isi variabel `PANBOX_REPOSITORY_ID` dan `PANBOX_SERVER` yang bisa dijangkau lewat jaringan privat. Jangan taruh scan key di file repo atau job pull request yang tidak tepercaya.
+**Sekali per repo, sebelum mengubah pipeline:**
+
+1. Masuk sebagai admin atau user dengan `repos:write`, buka **Repositories -> Enroll repository**. Pilih GitHub, GitLab, Bitbucket, Azure Repos, Gitea, atau Other Git.
+2. Isi **name** (label tampilan, misalnya `PANBOX`), **SCM repository ID or path** (identitas stabil dari provider, misalnya `alterwriter/PANBOX`), **default branch** (misalnya `main`), dan **owner** opsional. Pada GitLab, path seperti `group/subgroup/project` bisa dipakai. Nama tampilan, path SCM, dan ID internal PANBOX adalah tiga nilai berbeda.
+3. Klik **Enroll repository**. Dialog hasil menampilkan **PANBOX ID for CI**; salin ID ini ke variabel CI `PANBOX_REPOSITORY_ID`. ID yang sama selalu terlihat lagi pada tabel Repositories di kolom **PANBOX ID for CI**. Jangan isi variabel ini dengan path SCM.
+4. Klik **Generate scan key** pada dialog hasil atau pada baris repo. Admin/key manager membutuhkan `tokens:manage`, `scans:write`, dan akses repo. Beri label dan masa berlaku, lalu salin secret `pb_scan_...` yang hanya ditampilkan sekali ke secret CI terlindungi `PANBOX_TOKEN`. Key terikat tepat ke ID repo PANBOX tadi.
+5. Buka **Scan policy** pada baris repo: aktifkan scan, pilih VACCIN/ENETRON, dan ambang gate. Atur `PANBOX_SERVER` di CI ke URL API yang dapat dijangkau runner, misalnya alamat LAN PANBOX. `127.0.0.1` hanya benar jika runner dan server berada pada host yang sama. Jangan taruh scan key di file repo atau job pull request yang tidak tepercaya.
+6. Dari runner, cek koneksi, lalu cek key dan ID dengan perintah berikut. Setelah keduanya berhasil, jalankan job agent di bawah. Scan lengkap pertama muncul di **Scans**, lalu temuannya di **Findings**.
+
+```bash
+curl -fsS "$PANBOX_SERVER/readyz"
+curl -fsS -H "Authorization: Bearer $PANBOX_TOKEN" \
+  "$PANBOX_SERVER/v1/repos/$PANBOX_REPOSITORY_ID/scan-config"
+```
 
 **Setiap job Linux/macOS:** ambil installer versi tetap dari [release PANBOX v0.1.0-alpha.5](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.5). Installer memilih OS/CPU, mengunduh hanya binary agent, memeriksa [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.5/SHA256SUMS), lalu memasang di workspace job tanpa sudo:
 
@@ -99,7 +112,7 @@ Browser memakai password, session cookie HttpOnly, dan CSRF token. [Kontrak Open
 
 ## 9. Periksa dan kontrol scan di dashboard
 
-**Recast:** Findings -> filter repo dan branch -> Recast -> pilih effective severity atau pulihkan severity scanner -> isi alasan (10-500 karakter) -> Save. Perlu `findings:recast` dan akses repo. Raw severity tidak berubah. Riwayat tersedia di `GET /v1/findings/{id}/recasts`; gate lama memperoleh revisi dengan ambang asli masing-masing scan. Recast bukan persetujuan atau pengabaian temuan.
+**Recast:** buka **Findings**, kosongkan filter bila daftar belum terlihat, lalu klik **Recast severity** di samping rule temuan (kolom pertama). Pilih effective severity atau pulihkan severity scanner -> isi alasan (10-500 karakter) -> Save. Tombol hanya terlihat jika akun memiliki `findings:recast` dan akses repo; admin atau `security_reviewer` dengan membership repo dapat memakainya. Jika tidak ada baris, selesaikan scan pertama atau periksa filter. Jika ada baris tetapi tidak ada tombol, minta admin memeriksa role dan membership di **Settings & Audit -> RBAC**. Raw severity tidak berubah. Riwayat tersedia di `GET /v1/findings/{id}/recasts`; gate lama memperoleh revisi dengan ambang asli masing-masing scan. Recast bukan persetujuan atau pengabaian temuan.
 
 **Ekspor:** Reports -> pilih repo, branch tepat, modul scan (VACCIN/ENETRON), dan severity opsional -> Export PDF, CSV, atau JSON. Data berasal dari scan lengkap terbaru tiap branch. PDF adalah ringkasan teknis; CSV/JSON menyimpan kolom lengkap. Perlu `reports:export`.
 

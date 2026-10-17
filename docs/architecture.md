@@ -27,7 +27,7 @@ flowchart LR
 
 ## What crosses each boundary
 
-1. The runner obtains a Git checkout through its SCM's normal CI flow. The PANBOX server does not clone source or run scanner jobs.
+1. Before the first CI run, an operator enrolls the SCM path/ID in PANBOX. The API creates a separate internal repository ID, and an authorized key manager issues a scan key bound to it. The runner later obtains a Git checkout through its SCM's normal CI flow. PANBOX does not auto-enroll from uploads, clone source, or run scanner jobs.
 2. The agent checks selected source patterns with VACCIN and pinned dependency manifests with ENETRON. ENETRON sends **package names and versions** to the configured OSV-compatible advisory API over HTTPS. It does not send source files to that advisory endpoint. The alpha needs that advisory API for ENETRON; `--offline` suppresses dashboard upload only.
 3. Before an online scan, the agent sends `GET /v1/repos/{internal-id}/scan-config` with `Authorization: Bearer <scan-key>`. It reads whether scanning is enabled, which modules may run, and the gate threshold. The server validates the key against the internal repository ID. Offline scans skip this fetch and are checked when imported.
 4. The agent sends a normalized JSON bundle to `POST /v1/scans` with the same header. It contains repository/branch/commit identity, module status, rule IDs, severities, paths/lines, and short messages. It does not contain raw source snippets. The server checks module permissions again, writes the snapshot, and returns a gate result. A partial or error scan is unverified and does not replace the last successful posture.

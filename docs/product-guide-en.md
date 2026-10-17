@@ -52,9 +52,22 @@ Invoke-RestMethod http://127.0.0.1:8080/readyz
 
 ## 5. Add only the agent to CI
 
-**Set the scan policy first:** in Repositories -> Scan policy, choose allowed modules, a gate threshold, and whether new scans are enabled. The PANBOX dashboard controls the next online CI scan but does not start the provider pipeline.
+**Onboarding model:** PANBOX uses a register-first flow, similar to a SonarQube project key. The first scan does not create a repository or scan key automatically. This establishes the upload target and permissions before CI sends data. Enrollment only creates a PANBOX record; the form does not clone the source or require SCM credentials.
 
-**Once in PANBOX UI:** Repositories -> enroll a GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or Other Git repository using its stable provider ID/path. Copy the **internal PANBOX repository ID**. Generate its **scan key**. Store it as protected CI secret `PANBOX_TOKEN`; set `PANBOX_REPOSITORY_ID` and a reachable private `PANBOX_SERVER` CI variable. Never put a scan key in repository files or untrusted pull request jobs.
+**Once per repository, before changing the pipeline:**
+
+1. Sign in as an admin or a user with `repos:write`, then open **Repositories -> Enroll repository**. Select GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or Other Git.
+2. Enter **name** (display label, for example `PANBOX`), **SCM repository ID or path** (stable provider identity, for example `alterwriter/PANBOX`), **default branch** (for example `main`), and optional **owner**. A GitLab path such as `group/subgroup/project` works. Display name, SCM path, and internal PANBOX ID are three different values.
+3. Select **Enroll repository**. The result dialog shows **PANBOX ID for CI**; copy this ID into CI variable `PANBOX_REPOSITORY_ID`. It remains available in the Repositories table under **PANBOX ID for CI**. Do not put the SCM path in this variable.
+4. Select **Generate scan key** in the result dialog or repository row. The admin/key manager needs `tokens:manage`, `scans:write`, and repository access. Choose a label and expiry, then copy the one-time `pb_scan_...` secret into protected CI secret `PANBOX_TOKEN`. This key is bound to that PANBOX repository ID.
+5. Open the row's **Scan policy**: enable scans, select VACCIN/ENETRON, and set the gate threshold. Set `PANBOX_SERVER` in CI to the API URL reachable from the runner, such as PANBOX's LAN address. `127.0.0.1` works only when runner and server share a host. Never put a scan key in repository files or untrusted pull request jobs.
+6. From the runner, check connectivity, then check the key and ID with the commands below. When both work, run the agent job below. The first complete scan appears in **Scans**, with its findings in **Findings**.
+
+```bash
+curl -fsS "$PANBOX_SERVER/readyz"
+curl -fsS -H "Authorization: Bearer $PANBOX_TOKEN" \
+  "$PANBOX_SERVER/v1/repos/$PANBOX_REPOSITORY_ID/scan-config"
+```
 
 **Every Linux/macOS job:** download the pinned installer from [PANBOX release v0.1.0-alpha.5](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.5). It selects OS/CPU, downloads just the binary, checks [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.5/SHA256SUMS), and installs in the job workspace without sudo:
 
@@ -99,7 +112,7 @@ Browser login uses password, HttpOnly session cookie, and CSRF token. The [OpenA
 
 ## 9. Confirm and control scans in the dashboard
 
-**Recast:** Findings -> filter to the repository and branch -> Recast -> choose an effective severity or restore the scanner value -> enter a reason (10-500 characters) -> Save. Requires `findings:recast` and repository access. Raw severity never changes. The API exposes history at `GET /v1/findings/{id}/recasts`; affected historic gate revisions are recalculated against each scan's original threshold. Recast is not an approval or dismissal.
+**Recast:** open **Findings**, clear filters if no rows appear, then select **Recast severity** beside a finding rule (the first column). Choose an effective severity or restore the scanner value -> enter a reason (10-500 characters) -> Save. The button appears only with `findings:recast` and repository access; an admin or `security_reviewer` with repository membership can use it. If no rows appear, complete the first scan or check filters. If rows appear without the button, ask an admin to check role and membership under **Settings & Audit -> RBAC**. Raw severity never changes. The API exposes history at `GET /v1/findings/{id}/recasts`; affected historic gate revisions are recalculated against each scan's original threshold. Recast is not an approval or dismissal.
 
 **Export:** Reports -> choose repository, exact branch, scan module (VACCIN/ENETRON), and optional severity -> Export PDF, CSV, or JSON. Data comes from the latest complete scan per branch. PDF is a readable technical summary; CSV/JSON retain full rows. Requires `reports:export`.
 
