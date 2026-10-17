@@ -52,22 +52,24 @@ Invoke-RestMethod http://127.0.0.1:8080/readyz
 
 ## 5. Tambahkan hanya agent ke CI
 
-**Model onboarding:** PANBOX memakai alur daftarkan repo dahulu, seperti project key pada SonarQube. Scan pertama tidak otomatis membuat repo atau scan key. Ini membuat identitas tujuan dan izin upload ditetapkan sebelum CI mengirim data. Pendaftaran ini hanya membuat catatan di PANBOX; PANBOX tidak meng-clone repo dan tidak perlu kredensial SCM pada formulir tersebut.
+**Model onboarding:** PANBOX memakai alur daftarkan repo dahulu, seperti project key pada SonarQube. Scan pertama tidak otomatis membuat repo atau scan key. Ini membuat identitas tujuan dan izin upload ditetapkan sebelum CI mengirim data. Saat pendaftaran, host PANBOX mengecek metadata SCM untuk mendeteksi default branch repo publik. PANBOX tidak meng-clone repo dan tidak meminta kredensial SCM pada formulir tersebut.
 
 **Sekali per repo, sebelum mengubah pipeline:**
 
 1. Masuk sebagai admin atau user dengan `repos:write`, buka **Repositories -> Enroll repository**. Pilih GitHub, GitLab, Bitbucket, Azure Repos, Gitea, atau Other Git.
-2. Isi **name** (label tampilan, misalnya `PANBOX`), **SCM repository ID or path** (identitas stabil dari provider, misalnya `alterwriter/PANBOX`), **default branch** (misalnya `main`), dan **owner** opsional. Pada GitLab, path seperti `group/subgroup/project` bisa dipakai. Nama tampilan, path SCM, dan ID internal PANBOX adalah tiga nilai berbeda.
-3. Klik **Enroll repository**. Dialog hasil menampilkan **PANBOX ID for CI**; salin ID ini ke variabel CI `PANBOX_REPOSITORY_ID`. ID yang sama selalu terlihat lagi pada tabel Repositories di kolom **PANBOX ID for CI**. Jangan isi variabel ini dengan path SCM.
+2. Isi **name** (label tampilan, misalnya `PANBOX`) dan **SCM repository ID or path** (misalnya `alterwriter/PANBOX`; GitLab dapat memakai `group/subgroup/project`). Klik **Test SCM connectivity and detect branch**. Metadata publik GitHub, GitLab, Bitbucket, Azure Repos, atau Gitea yang diizinkan operator mengisi **default branch** otomatis. **Owner** boleh kosong; ini hanya label tampilan, bukan RBAC atau izin scan. Nama tampilan, path SCM, dan ID internal PANBOX adalah tiga nilai berbeda.
+3. Baca hasil tes sebelum klik **Enroll repository**. **Verified metadata** berarti host PANBOX dapat membaca metadata dan default branch. **Host reachable / branch manual** berarti endpoint Git terjangkau tetapi branch tidak terdeteksi. **Runner check needed** berarti metadata privat/tidak terjangkau atau host self-managed belum diizinkan; isi default branch manual dan centang konfirmasi pemeriksaan dari runner. Status belum terverifikasi bukan bukti repo salah. Untuk Gitea/Other Git, gunakan URL HTTPS penuh dan daftarkan host tepatnya di `PANBOX_SCM_ALLOWED_HOSTS` pada dashboard. PANBOX mengulang tes saat submit. Dialog hasil menampilkan **PANBOX ID for CI**; salin ke variabel CI `PANBOX_REPOSITORY_ID`. ID yang sama ada di tabel Repositories. Jangan isi variabel ini dengan path SCM.
 4. Klik **Generate scan key** pada dialog hasil atau pada baris repo. Admin/key manager membutuhkan `tokens:manage`, `scans:write`, dan akses repo. Beri label dan masa berlaku, lalu salin secret `pb_scan_...` yang hanya ditampilkan sekali ke secret CI terlindungi `PANBOX_TOKEN`. Key terikat tepat ke ID repo PANBOX tadi.
 5. Buka **Scan policy** pada baris repo: aktifkan scan, pilih VACCIN/ENETRON, dan ambang gate. Atur `PANBOX_SERVER` di CI ke URL API yang dapat dijangkau runner, misalnya alamat LAN PANBOX. `127.0.0.1` hanya benar jika runner dan server berada pada host yang sama. Jangan taruh scan key di file repo atau job pull request yang tidak tepercaya.
-6. Dari runner, cek koneksi, lalu cek key dan ID dengan perintah berikut. Setelah keduanya berhasil, jalankan job agent di bawah. Scan lengkap pertama muncul di **Scans**, lalu temuannya di **Findings**.
+6. Dari runner dengan kredensial checkout SCM milik CI, pastikan checkout berhasil (`git rev-parse --is-inside-work-tree`), lalu cek koneksi dashboard, key, dan ID dengan perintah berikut. Tes metadata dashboard pada langkah 2 tidak membuktikan jalur runner. Setelah berhasil, jalankan job agent di bawah. Scan lengkap pertama muncul di **Scans**, lalu temuannya di **Findings**.
 
 ```bash
 curl -fsS "$PANBOX_SERVER/readyz"
 curl -fsS -H "Authorization: Bearer $PANBOX_TOKEN" \
   "$PANBOX_SERVER/v1/repos/$PANBOX_REPOSITORY_ID/scan-config"
 ```
+
+**Branch setelah enrollment:** setiap job melaporkan branch checkout sendiri; branch fitur baru otomatis muncul sebagai scan, temuan, dan laporan terpisah tanpa enroll ulang. Overview memakai **default branch** terdaftar sebagai baseline, jadi scan branch lain tidak mengubahnya. Bila default branch SCM berubah, klik **Recheck SCM** pada baris repository. Untuk repo privat yang tidak bisa dibaca dashboard, status tetap membutuhkan pemeriksaan runner; scan pertama tidak dianggap sebagai default branch.
 
 **Setiap job Linux/macOS:** ambil installer versi tetap dari [release PANBOX v0.1.0-alpha.5](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.5). Installer memilih OS/CPU, mengunduh hanya binary agent, memeriksa [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.5/SHA256SUMS), lalu memasang di workspace job tanpa sudo:
 

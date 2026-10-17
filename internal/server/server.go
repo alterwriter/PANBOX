@@ -292,7 +292,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/credentials", s.protected(s.credentials))
 	mux.HandleFunc("DELETE /v1/credentials/{id}", s.protected(s.revokeCredential))
 	mux.HandleFunc("GET /v1/repos", s.protected(s.repos))
+	mux.HandleFunc("POST /v1/repos/inspect", s.protected(s.inspectRepo))
 	mux.HandleFunc("POST /v1/repos", s.protected(s.createRepo))
+	mux.HandleFunc("POST /v1/repos/{id}/recheck-scm", s.protected(s.recheckRepoSCM))
 	mux.HandleFunc("POST /v1/repos/{id}/scan-tokens", s.protected(s.scanToken))
 	mux.HandleFunc("GET /v1/repos/{id}/scan-config", s.protected(s.getScanConfig))
 	mux.HandleFunc("PUT /v1/repos/{id}/scan-config", s.protected(s.putScanConfig))
@@ -675,7 +677,7 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
 	if !require(w, r, "repos:read") {
 		return
 	}
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,name,provider,provider_project_id,default_branch,owner FROM repositories ORDER BY name`)
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,name,provider,provider_project_id,default_branch,owner,scm_check_status FROM repositories ORDER BY name`)
 	if err != nil {
 		fail(w, 500, "database error")
 		return
@@ -683,10 +685,10 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []any{}
 	for rows.Next() {
-		var id, name, provider, project, branch, owner string
-		_ = rows.Scan(&id, &name, &provider, &project, &branch, &owner)
+		var id, name, provider, project, branch, owner, checkStatus string
+		_ = rows.Scan(&id, &name, &provider, &project, &branch, &owner, &checkStatus)
 		if s.repoAllowed(r.Context(), who(r), id) {
-			out = append(out, map[string]string{"id": id, "name": name, "provider": provider, "provider_project_id": project, "default_branch": branch, "owner": owner})
+			out = append(out, map[string]string{"id": id, "name": name, "provider": provider, "provider_project_id": project, "default_branch": branch, "owner": owner, "scm_check_status": checkStatus})
 		}
 	}
 	jsonOut(w, 200, out)
@@ -708,22 +710,35 @@ func (s *Server) createRepo(w http.ResponseWriter, r *http.Request) {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
 	in.ProviderProjectID = strings.TrimSpace(in.ProviderProjectID)
+	in.DefaultBranch = strings.TrimSpace(in.DefaultBranch)
+	in.Owner = strings.TrimSpace(in.Owner)
 	if in.Name == "" || in.ProviderProjectID == "" || !regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`).MatchString(in.Provider) {
 		fail(w, 400, "name, provider and provider repository ID required")
 		return
 	}
-	if in.DefaultBranch == "" {
-		in.DefaultBranch = "main"
+	check, err := inspectSCM(r.Context(), in.Provider, in.ProviderProjectID)
+	if err != nil {
+		fail(w, 500, "SCM inspection failed")
+		return
+	}
+	if check.Status == "verified" {
+		in.DefaultBranch = check.DefaultBranch
+		if in.Owner == "" {
+			in.Owner = check.Owner
+		}
+	} else if in.DefaultBranch == "" {
+		fail(w, 422, "SCM default branch unavailable; test from the CI runner and enter the branch manually")
+		return
 	}
 	id := core.ID()
-	_, err := s.DB.ExecContext(r.Context(), `INSERT INTO repositories(id,name,provider,provider_project_id,default_branch,owner) VALUES($1,$2,$3,$4,$5,$6)`, id, in.Name, in.Provider, in.ProviderProjectID, in.DefaultBranch, in.Owner)
+	_, err = s.DB.ExecContext(r.Context(), `INSERT INTO repositories(id,name,provider,provider_project_id,default_branch,owner,scm_check_status,scm_checked_at) VALUES($1,$2,$3,$4,$5,$6,$7,now())`, id, in.Name, in.Provider, in.ProviderProjectID, in.DefaultBranch, in.Owner, check.Status)
 	if err != nil {
 		fail(w, 400, "repository already enrolled or invalid")
 		return
 	}
 	_, _ = s.DB.ExecContext(r.Context(), `INSERT INTO repository_members(repository_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id, who(r).UserID)
-	s.audit(r.Context(), who(r).UserID, "repo.enroll", id, map[string]any{"provider_project_id": in.ProviderProjectID})
-	jsonOut(w, 201, map[string]string{"id": id})
+	s.audit(r.Context(), who(r).UserID, "repo.enroll", id, map[string]any{"provider_project_id": in.ProviderProjectID, "scm_check_status": check.Status})
+	jsonOut(w, 201, map[string]string{"id": id, "default_branch": in.DefaultBranch, "owner": in.Owner, "scm_check_status": check.Status})
 }
 func (s *Server) scanToken(w http.ResponseWriter, r *http.Request) {
 	if !require(w, r, "tokens:manage") {

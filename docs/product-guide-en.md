@@ -52,22 +52,24 @@ Invoke-RestMethod http://127.0.0.1:8080/readyz
 
 ## 5. Add only the agent to CI
 
-**Onboarding model:** PANBOX uses a register-first flow, similar to a SonarQube project key. The first scan does not create a repository or scan key automatically. This establishes the upload target and permissions before CI sends data. Enrollment only creates a PANBOX record; the form does not clone the source or require SCM credentials.
+**Onboarding model:** PANBOX uses a register-first flow, similar to a SonarQube project key. The first scan does not create a repository or scan key automatically. This establishes the upload target and permissions before CI sends data. During enrollment, the PANBOX host checks SCM metadata to detect the default branch of public repositories. It does not clone source or request SCM credentials in the form.
 
 **Once per repository, before changing the pipeline:**
 
 1. Sign in as an admin or a user with `repos:write`, then open **Repositories -> Enroll repository**. Select GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or Other Git.
-2. Enter **name** (display label, for example `PANBOX`), **SCM repository ID or path** (stable provider identity, for example `alterwriter/PANBOX`), **default branch** (for example `main`), and optional **owner**. A GitLab path such as `group/subgroup/project` works. Display name, SCM path, and internal PANBOX ID are three different values.
-3. Select **Enroll repository**. The result dialog shows **PANBOX ID for CI**; copy this ID into CI variable `PANBOX_REPOSITORY_ID`. It remains available in the Repositories table under **PANBOX ID for CI**. Do not put the SCM path in this variable.
+2. Enter **name** (display label, for example `PANBOX`) and **SCM repository ID or path** (for example `alterwriter/PANBOX`; GitLab may use `group/subgroup/project`). Select **Test SCM connectivity and detect branch**. Public metadata from GitHub, GitLab, Bitbucket, Azure Repos, or an operator-allowed Gitea host fills **default branch** automatically. **Owner** may be blank; it is display metadata, not RBAC or scan authorization. Display name, SCM path, and internal PANBOX ID are three different values.
+3. Read the result before selecting **Enroll repository**. **Verified metadata** means the PANBOX host read the default branch. **Host reachable / branch manual** means a Git endpoint responded without branch metadata. **Runner check needed** means private/unreachable metadata or a self-managed host without allowlisting; enter the default branch and acknowledge runner validation. An unverified status does not prove the repository is wrong. For Gitea/Other Git, provide the full HTTPS URL and add its exact host to dashboard `PANBOX_SCM_ALLOWED_HOSTS`. PANBOX checks again on submit. The result dialog shows **PANBOX ID for CI**; copy it into CI variable `PANBOX_REPOSITORY_ID`. The ID remains in the Repositories table. Do not put the SCM path in this variable.
 4. Select **Generate scan key** in the result dialog or repository row. The admin/key manager needs `tokens:manage`, `scans:write`, and repository access. Choose a label and expiry, then copy the one-time `pb_scan_...` secret into protected CI secret `PANBOX_TOKEN`. This key is bound to that PANBOX repository ID.
 5. Open the row's **Scan policy**: enable scans, select VACCIN/ENETRON, and set the gate threshold. Set `PANBOX_SERVER` in CI to the API URL reachable from the runner, such as PANBOX's LAN address. `127.0.0.1` works only when runner and server share a host. Never put a scan key in repository files or untrusted pull request jobs.
-6. From the runner, check connectivity, then check the key and ID with the commands below. When both work, run the agent job below. The first complete scan appears in **Scans**, with its findings in **Findings**.
+6. From the runner using its CI checkout credentials, verify checkout succeeded (`git rev-parse --is-inside-work-tree`), then check dashboard reachability, key, and ID with the commands below. The dashboard metadata check in step 2 does not prove either runner path. Once both succeed, run the agent job below. The first complete scan appears in **Scans**, with its findings in **Findings**.
 
 ```bash
 curl -fsS "$PANBOX_SERVER/readyz"
 curl -fsS -H "Authorization: Bearer $PANBOX_TOKEN" \
   "$PANBOX_SERVER/v1/repos/$PANBOX_REPOSITORY_ID/scan-config"
 ```
+
+**Branches after enrollment:** every job reports its checkout branch, so new feature branches automatically appear as separate scans, findings, and reports without reenrollment. Overview uses the enrolled **default branch** as its baseline; another branch's scan does not replace it. If the SCM default changes, select **Recheck SCM** on the repository row. For private metadata the status still requires runner validation; the first reported branch is never assumed to be the default.
 
 **Every Linux/macOS job:** download the pinned installer from [PANBOX release v0.1.0-alpha.5](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.5). It selects OS/CPU, downloads just the binary, checks [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.5/SHA256SUMS), and installs in the job workspace without sudo:
 

@@ -78,15 +78,29 @@ paths:
       responses: {'200': {description: Credential revoked}}
   /v1/repos:
     get:
-      responses: {'200': {description: Authorized repository list}}
+      responses: {'200': {description: Authorized repository list, including default_branch, owner, and scm_check_status}}
     post:
-      description: Enroll an SCM repository before its first scan. The response ID is PANBOX's internal ID, not provider_project_id; use it as PANBOX_REPOSITORY_ID in CI. Requires repos:write.
+      description: Enroll an SCM repository before its first scan. The server rechecks public SCM metadata and uses its default branch; when unavailable, default_branch must be supplied explicitly. Owner is optional display metadata, not authorization. The response ID is PANBOX's internal ID, not provider_project_id; use it as PANBOX_REPOSITORY_ID in CI. Requires repos:write.
       requestBody:
         required: true
         content:
           application/json:
             schema: {type: object, required: [name, provider, provider_project_id], properties: {name: {type: string}, provider: {type: string, pattern: '^[a-z][a-z0-9_-]{1,31}$'}, provider_project_id: {type: string}, default_branch: {type: string}, owner: {type: string}}}
-      responses: {'201': {description: Enrolled repository ID}}
+      responses: {'201': {description: Enrolled repository ID, effective default branch, owner, and SCM check status}, '422': {description: Metadata unavailable and default branch missing}}
+  /v1/repos/inspect:
+    post:
+      description: Check SCM metadata from the PANBOX host before enrollment. Public hosted providers need no credential. This does not prove the CI runner can reach the SCM or PANBOX. Requires repos:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [provider, provider_project_id], properties: {provider: {type: string}, provider_project_id: {type: string}}}
+      responses: {'200': {description: 'SCM status: verified, reachable_no_branch, or manual_required; includes detected default_branch and owner when available'}}
+  /v1/repos/{id}/recheck-scm:
+    post:
+      description: Recheck enrolled SCM metadata; verified metadata refreshes its default branch. Requires repos:write and repository access.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Updated SCM status and detected metadata}, '403': {description: Repository denied}, '404': {description: Repository not found}}
   /v1/repos/{id}/scan-tokens:
     post:
       description: Generate a one-time scan key bound to the PANBOX internal repository ID. Requires tokens:manage, scans:write, and repository access. Store the returned secret as PANBOX_TOKEN in CI.
