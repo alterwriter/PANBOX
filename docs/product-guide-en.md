@@ -69,7 +69,7 @@ curl -fsS -H "Authorization: Bearer $PANBOX_TOKEN" \
   "$PANBOX_SERVER/v1/repos/$PANBOX_REPOSITORY_ID/scan-config"
 ```
 
-**Branches after enrollment:** every job reports its checkout branch, so new feature branches automatically appear as separate scans, findings, and reports without reenrollment. Overview uses the enrolled **default branch** as its baseline; another branch's scan does not replace it. If the SCM default changes, select **Recheck SCM** on the repository row. For private metadata the status still requires runner validation; the first reported branch is never assumed to be the default.
+**Branches after enrollment:** every job reports its checkout branch, so a feature branch appears as separate scans, findings, and reports without reenrollment **once CI actually runs PANBOX on that branch**. PANBOX does not trigger pipelines or scan every branch by itself. The supplied GitHub example triggers `main`, and the GitLab example runs only on protected branches; extend CI rules under your team's policy to scan others. Overview uses the enrolled **default branch** as its baseline; another branch's scan does not replace it. If the SCM default changes, select **Recheck SCM** on the repository row. For private metadata the status still requires runner validation; the first reported branch is never assumed to be the default.
 
 **Every Linux/macOS job:** download the pinned installer from [PANBOX release v0.1.0-alpha.5](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.5). It selects OS/CPU, downloads just the binary, checks [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.5/SHA256SUMS), and installs in the job workspace without sudo:
 
