@@ -94,4 +94,4 @@ go test ./...
 cd web && npm ci && npm run build
 ```
 
-Integration tests use a separate PostgreSQL database when `PANBOX_TEST_DATABASE_URL` is set. The API contract is in `api/openapi.yaml`. Historical blueprint decisions are recorded in `docs/PANBOX-blueprint-v1.md`; this README reflects the current native-only direction.
+Integration tests use a separate PostgreSQL database when `PANBOX_TEST_DATABASE_URL` is set. Start with the [documentation index](docs/README.md) for setup, architecture, integration, API, and release guides.
