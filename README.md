@@ -48,7 +48,7 @@ The [GitHub Releases page](https://github.com/alterwriter/PANBOX/releases) provi
 On a Linux/macOS CI runner, install only the agent into the job workspace at runtime:
 
 ```bash
-PANBOX_VERSION=v0.1.0-alpha.3
+PANBOX_VERSION=v0.1.0-alpha.4
 curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
 sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 .panbox/bin/panbox go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path .

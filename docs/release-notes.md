@@ -1,5 +1,7 @@
 PANBOX native agent preview for Linux, macOS, and Windows on amd64 and arm64.
 
+This release supersedes `v0.1.0-alpha.3`: the shell installer now verifies checksums with `sha256sum -c`, which works with BusyBox-based CI images such as Alpine.
+
 - Each platform now has a direct `panbox-agent_<os>_<arch>` binary asset (with `.exe` on Windows). These assets contain only the agent, not the dashboard or PostgreSQL.
 - `install-agent.sh` and `install-agent.ps1` download the platform binary and verify it against `SHA256SUMS` inside a CI workspace. Pin this release tag in your pipeline; see the copy-ready examples in `deploy/`.
 - The older archive format is retained for manual users.

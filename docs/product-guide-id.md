@@ -10,7 +10,7 @@ Host Git/CI -> runner terlindungi -> agent PANBOX -> API PANBOX privat -> Postgr
                                        | ENETRON: paket -> OSV       +-> UI React
 ```
 
-**Hasil:** CI menerima status pass, gate gagal, scan tidak lengkap, atau akses ditolak; operator melihat snapshot repo dan branch. File source tetap di runner. ENETRON mengirim nama dan versi paket ke API advisory kompatibel OSV. Agent mengunggah temuan ternormalisasi dan scan key terikat repo ke PANBOX, tanpa potongan source mentah. Lihat [diagram arsitektur dan jaringan](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.3/docs/architecture.md).
+**Hasil:** CI menerima status pass, gate gagal, scan tidak lengkap, atau akses ditolak; operator melihat snapshot repo dan branch. File source tetap di runner. ENETRON mengirim nama dan versi paket ke API advisory kompatibel OSV. Agent mengunggah temuan ternormalisasi dan scan key terikat repo ke PANBOX, tanpa potongan source mentah. Lihat [diagram arsitektur dan jaringan](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/docs/architecture.md).
 
 ## 2. Pilih jalur setup
 
@@ -54,24 +54,24 @@ Invoke-RestMethod http://127.0.0.1:8080/readyz
 
 **Sekali di UI PANBOX:** Repositories -> daftarkan repo GitHub, GitLab, Bitbucket, Azure Repos, Gitea, atau Other Git memakai ID/path stabil dari providernya. Salin **ID repo internal PANBOX**. Buat **scan key** repo itu. Simpan sebagai secret CI terlindungi `PANBOX_TOKEN`; isi variabel `PANBOX_REPOSITORY_ID` dan `PANBOX_SERVER` yang bisa dijangkau lewat jaringan privat. Jangan taruh scan key di file repo atau job pull request yang tidak tepercaya.
 
-**Setiap job Linux/macOS:** ambil installer versi tetap dari [release PANBOX v0.1.0-alpha.3](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.3). Installer memilih OS/CPU, mengunduh hanya binary agent, memeriksa [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.3/SHA256SUMS), lalu memasang di workspace job tanpa sudo:
+**Setiap job Linux/macOS:** ambil installer versi tetap dari [release PANBOX v0.1.0-alpha.4](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.4). Installer memilih OS/CPU, mengunduh hanya binary agent, memeriksa [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.4/SHA256SUMS), lalu memasang di workspace job tanpa sudo:
 
 ```bash
-PANBOX_VERSION=v0.1.0-alpha.3
+PANBOX_VERSION=v0.1.0-alpha.4
 curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
 sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 .panbox/bin/panbox go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path .
 ```
 
-**Hasil yang diharapkan:** exit `0` scan lengkap/pass; `1` gate gagal; `2` scan/transport/konfigurasi tidak lengkap; `3` autentikasi atau izin ditolak. Salin contoh [GitHub Actions](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.3/deploy/github-actions-local-runner.yml) atau [GitLab CI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.3/deploy/gitlab-ci-local-runner.yml). Untuk runner Windows, unduh [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.3/install-agent.ps1), lalu jalankan `./install-agent.ps1 -Version v0.1.0-alpha.3`; hasilnya `./.panbox/bin/panbox.exe` setelah verifikasi checksum. [Binary agent langsung](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.3) juga tersedia.
+**Hasil yang diharapkan:** exit `0` scan lengkap/pass; `1` gate gagal; `2` scan/transport/konfigurasi tidak lengkap; `3` autentikasi atau izin ditolak. Salin contoh [GitHub Actions](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/github-actions-local-runner.yml) atau [GitLab CI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/gitlab-ci-local-runner.yml). Untuk runner Windows, unduh [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.4/install-agent.ps1), lalu jalankan `./install-agent.ps1 -Version v0.1.0-alpha.4`; hasilnya `./.panbox/bin/panbox.exe` setelah verifikasi checksum. [Binary agent langsung](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.4) juga tersedia.
 
 VACCIN memeriksa beberapa pola source Python, JavaScript/TypeScript, dan Go. ENETRON mencocokkan dependensi berversi tetap dari npm lockfile v2/v3, `requirements.txt`, dan `go.mod` dengan data advisory OSV. OSV adalah sumber data, bukan engine scanner. `PANBOX_ADVISORY_URL` atau `--advisory-url` memilih mirror kompatibel OSV. `--offline` meniadakan upload ke dashboard, tetapi ENETRON tetap menghubungi API advisory kecuali hanya `--modules vaccin` yang dipilih.
 
 ## 6. Hubungkan SCM publik ke PANBOX privat
 
-- **Runner lokal terlindungi (disarankan):** polling SCM apa pun lewat HTTPS keluar, lalu mengirim ke PANBOX di LAN. Tidak perlu port PANBOX publik; gate sinkron. Contoh [GitHub](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.3/deploy/github-actions-local-runner.yml) dan [GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.3/deploy/gitlab-ci-local-runner.yml).
-- **SSH relay:** PANBOX membuka reverse tunnel keluar ke relay yang terjangkau; shared runner membuka forward tunnel. PANBOX tidak menerima port internet masuk; gate sinkron. Pin host key dan batasi identity. Lihat [contoh relay GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.3/deploy/gitlab-ci-ssh-relay.yml).
-- **Impor artifact:** CI menulis `panbox-results.json`; host privat mengambil dan mengimpornya belakangan. Tanpa jalur masuk/relay; gate belakangan tidak dapat memblokir job CI itu. [Contoh artifact GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.3/deploy/gitlab-ci-pull-artifact.yml) dan `panbox relay-pull` mengotomasi GitLab; SCM lain memerlukan langkah unduh artifact sebelum impor generik `panbox go --bundle`.
+- **Runner lokal terlindungi (disarankan):** polling SCM apa pun lewat HTTPS keluar, lalu mengirim ke PANBOX di LAN. Tidak perlu port PANBOX publik; gate sinkron. Contoh [GitHub](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/github-actions-local-runner.yml) dan [GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/gitlab-ci-local-runner.yml).
+- **SSH relay:** PANBOX membuka reverse tunnel keluar ke relay yang terjangkau; shared runner membuka forward tunnel. PANBOX tidak menerima port internet masuk; gate sinkron. Pin host key dan batasi identity. Lihat [contoh relay GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/gitlab-ci-ssh-relay.yml).
+- **Impor artifact:** CI menulis `panbox-results.json`; host privat mengambil dan mengimpornya belakangan. Tanpa jalur masuk/relay; gate belakangan tidak dapat memblokir job CI itu. [Contoh artifact GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/gitlab-ci-pull-artifact.yml) dan `panbox relay-pull` mengotomasi GitLab; SCM lain memerlukan langkah unduh artifact sebelum impor generik `panbox go --bundle`.
 
 **Cek:** dari runner sinkron, `curl -fsS "$PANBOX_SERVER/readyz"` harus berhasil. Repo publik tidak otomatis membuat artifact CI publik.
 
@@ -91,7 +91,7 @@ VACCIN memeriksa beberapa pola source Python, JavaScript/TypeScript, dan Go. ENE
 curl -H "Authorization: Bearer $PANBOX_ACCESS_KEY" "$PANBOX_SERVER/v1/repos"
 ```
 
-Browser memakai password, session cookie HttpOnly, dan CSRF token. [Kontrak OpenAPI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.3/api/openapi.yaml) memuat endpoint pilot. Rotasi key: buat baru, perbarui klien, pastikan akses berhasil, lalu cabut key lama.
+Browser memakai password, session cookie HttpOnly, dan CSRF token. [Kontrak OpenAPI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/api/openapi.yaml) memuat endpoint pilot. Rotasi key: buat baru, perbarui klien, pastikan akses berhasil, lalu cabut key lama.
 
 ## 9. Periksa hasil scan di dashboard
 
