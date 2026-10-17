@@ -90,6 +90,20 @@ paths:
     post:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       responses: {'201': {description: Repository-bound one-time scan key}}
+  /v1/repos/{id}/scan-config:
+    get:
+      description: Requires repos:read or a repository-bound scan key. The agent reads this before an online scan.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Enabled modules and gate threshold}}
+    put:
+      description: Requires repos:write and repository access. Applies to future uploads.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [enabled, vaccin, enetron, gate_severity], properties: {enabled: {type: boolean}, vaccin: {type: boolean}, enetron: {type: boolean}, gate_severity: {type: string, enum: [info, low, medium, high, critical]}}}
+      responses: {'200': {description: Updated scan policy version}, '400': {description: Invalid module or severity}}
   /v1/repos/{id}/members/{user}:
     put:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: user, in: path, required: true, schema: {type: string}}]
@@ -106,11 +120,11 @@ paths:
         content:
           application/json:
             schema: {$ref: '#/components/schemas/ScanBundle'}
-      responses: {'201': {description: Scan ingested}, '200': {description: Idempotent retry}, '403': {description: Repository scope denied}}
+      responses: {'201': {description: Scan ingested}, '200': {description: Idempotent retry}, '403': {description: Repository scope denied}, '409': {description: Scanning or selected module disabled}}
   /v1/scans/{id}:
     get:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: Immutable scan metadata and gate revision}}
+      responses: {'200': {description: Scan metadata and current gate revision}}
   /v1/findings:
     get:
       parameters:
@@ -119,12 +133,32 @@ paths:
         - {name: module, in: query, schema: {type: string}}
         - {name: severity, in: query, schema: {type: string}}
       responses: {'200': {description: Authorized occurrence rows}}
+  /v1/findings/{id}/recast:
+    post:
+      description: Requires findings:recast and repository access. Updates effective severity across occurrences, recalculates affected gates, and records history. Use severity raw to restore scanner severity.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [severity, reason], properties: {severity: {type: string, enum: [raw, info, low, medium, high, critical]}, reason: {type: string, minLength: 10, maxLength: 500}}}
+      responses: {'200': {description: Recast saved and gates revised}, '403': {description: Permission or repository denied}}
+  /v1/findings/{id}/recasts:
+    get:
+      description: Requires findings:read and repository access.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Recent recast history}}
   /v1/metrics/overview:
     get:
       responses: {'200': {description: Default branch latest-scan posture and coverage}}
   /v1/reports/technical:
     get:
-      parameters: [{name: format, in: query, schema: {type: string, enum: [csv, json]}}]
+      parameters:
+        - {name: format, in: query, schema: {type: string, enum: [csv, json, pdf]}}
+        - {name: repository_id, in: query, schema: {type: string}}
+        - {name: branch, in: query, schema: {type: string}}
+        - {name: module, in: query, schema: {type: string, enum: [vaccin, enetron]}}
+        - {name: severity, in: query, schema: {type: string}}
       responses: {'200': {description: Audited technical export}}
   /v1/audit-events:
     get:

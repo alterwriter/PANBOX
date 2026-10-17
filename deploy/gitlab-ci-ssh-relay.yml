@@ -2,16 +2,20 @@
 # tunnel to the same relay. The scan token never resides on the relay.
 panbox_scan:
   stage: test
-  image: your-registry/panbox-agent:<version>
+  image: alpine:3.22
   variables:
     PANBOX_SERVER: http://127.0.0.1:18080
+    PANBOX_VERSION: v0.1.0-alpha.5
   before_script:
+    - apk add --no-cache curl openssh-client
+    - curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
+    - sh install-panbox-agent.sh "$PANBOX_VERSION" "$CI_PROJECT_DIR/.panbox/bin"
     - install -m 700 -d ~/.ssh
     - printf '%s\n' "$PANBOX_RELAY_KNOWN_HOSTS" > ~/.ssh/known_hosts
     - printf '%s\n' "$PANBOX_RELAY_SSH_KEY" > ~/.ssh/id_ed25519
     - chmod 600 ~/.ssh/id_ed25519
     - ssh -fN -o ExitOnForwardFailure=yes -L 127.0.0.1:18080:127.0.0.1:18080 relay-user@relay-address
   script:
-    - panbox go --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$CI_COMMIT_REF_NAME" --commit "$CI_COMMIT_SHA" --base-sha "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}"
+    - '"$CI_PROJECT_DIR/.panbox/bin/panbox" go --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$CI_COMMIT_REF_NAME" --commit "$CI_COMMIT_SHA" --base-sha "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}"'
   rules:
     - if: '$CI_COMMIT_REF_PROTECTED == "true"'

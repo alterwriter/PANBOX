@@ -36,7 +36,7 @@ type principal struct {
 }
 type ctxKey struct{}
 
-var permissions = []string{"repos:read", "repos:write", "scans:read", "scans:write", "findings:read", "reports:export", "rbac:manage", "tokens:manage", "audit:read"}
+var permissions = []string{"repos:read", "repos:write", "scans:read", "scans:write", "findings:read", "findings:recast", "reports:export", "rbac:manage", "tokens:manage", "audit:read"}
 var secretPattern = regexp.MustCompile(`(?i)(glpat-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{30,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:password|secret|token)\s*[:=]\s*[^\s,;]{8,})`)
 
 func containsSecret(s string) bool { return secretPattern.MatchString(s) }
@@ -69,18 +69,26 @@ func (s *Server) migrate(ctx context.Context) error {
 	if dir == "" {
 		dir = "migrations"
 	}
-	b, err := os.ReadFile(filepath.Join(dir, "001_init.sql"))
-	if err != nil {
-		return err
+	files, err := filepath.Glob(filepath.Join(dir, "[0-9][0-9][0-9]_*.sql"))
+	if err != nil || len(files) == 0 {
+		return errors.New("migration files unavailable")
 	}
-	_, err = s.DB.ExecContext(ctx, string(b))
-	return err
+	for _, file := range files {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		if _, err = s.DB.ExecContext(ctx, string(b)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) seed(ctx context.Context) error {
 	roles := map[string][]string{
 		"admin":             permissions,
-		"security_reviewer": {"repos:read", "scans:read", "findings:read", "reports:export", "audit:read"},
+		"security_reviewer": {"repos:read", "scans:read", "findings:read", "findings:recast", "reports:export", "audit:read"},
 		"developer":         {"repos:read", "scans:read", "findings:read", "reports:export"},
 		"executive_viewer":  {"repos:read", "scans:read", "reports:export"},
 		"scanner_ci":        {"scans:write"},
@@ -286,12 +294,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/repos", s.protected(s.repos))
 	mux.HandleFunc("POST /v1/repos", s.protected(s.createRepo))
 	mux.HandleFunc("POST /v1/repos/{id}/scan-tokens", s.protected(s.scanToken))
+	mux.HandleFunc("GET /v1/repos/{id}/scan-config", s.protected(s.getScanConfig))
+	mux.HandleFunc("PUT /v1/repos/{id}/scan-config", s.protected(s.putScanConfig))
 	mux.HandleFunc("PUT /v1/repos/{id}/members/{user}", s.protected(s.addRepoMember))
 	mux.HandleFunc("DELETE /v1/repos/{id}/members/{user}", s.protected(s.removeRepoMember))
 	mux.HandleFunc("GET /v1/scans", s.protected(s.scans))
 	mux.HandleFunc("POST /v1/scans", s.protected(s.ingest))
 	mux.HandleFunc("GET /v1/scans/{id}", s.protected(s.scan))
 	mux.HandleFunc("GET /v1/findings", s.protected(s.findings))
+	mux.HandleFunc("POST /v1/findings/{id}/recast", s.protected(s.recastFinding))
+	mux.HandleFunc("GET /v1/findings/{id}/recasts", s.protected(s.findingRecasts))
 	mux.HandleFunc("GET /v1/metrics/overview", s.protected(s.overview))
 	mux.HandleFunc("GET /v1/reports/technical", s.protected(s.report))
 	mux.HandleFunc("GET /v1/audit-events", s.protected(s.auditEvents))

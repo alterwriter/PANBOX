@@ -51,6 +51,38 @@ type bundle struct {
 	Findings []finding `json:"findings"`
 }
 
+type scanConfig struct {
+	Enabled      bool   `json:"enabled"`
+	Vaccin       bool   `json:"vaccin"`
+	Enetron      bool   `json:"enetron"`
+	GateSeverity string `json:"gate_severity"`
+	Version      int    `json:"version"`
+}
+
+func fetchScanConfig(base, repo, token string) (scanConfig, error) {
+	var cfg scanConfig
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", base+"/v1/repos/"+url.PathEscape(repo)+"/scan-config", nil)
+	if err != nil {
+		return cfg, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return cfg, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return cfg, fmt.Errorf("scan config HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if err = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&cfg); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
 func main() { os.Exit(run(os.Args[1:])) }
 func run(args []string) int {
 	if len(args) == 0 {
@@ -66,12 +98,14 @@ func run(args []string) int {
 		return relayPull(args[1:])
 	case "shutdown":
 		return shutdown()
+	case "mcp":
+		return runMCP(args[1:])
 	default:
 		usage()
 		return 2
 	}
 }
-func usage() { fmt.Fprintln(os.Stderr, "panbox ready|go|relay-pull|shutdown  (see README.md)") }
+func usage() { fmt.Fprintln(os.Stderr, "panbox ready|go|relay-pull|mcp|shutdown  (see README.md)") }
 func git(path string, args ...string) string {
 	c := exec.Command("git", append([]string{"-C", path}, args...)...)
 	b, err := c.Output()
@@ -156,6 +190,55 @@ func goScan(args []string) int {
 	if *format != "text" && *format != "json" && *format != "sarif" {
 		fmt.Fprintln(os.Stderr, "format must be text, json or sarif")
 		return 2
+	}
+	if !*offline && *fixture == "" {
+		base, err := baseServer(*server)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		token := os.Getenv("PANBOX_TOKEN")
+		if token == "" {
+			fmt.Fprintln(os.Stderr, "PANBOX_TOKEN required")
+			return 3
+		}
+		if *repo == "" {
+			fmt.Fprintln(os.Stderr, "PANBOX_REPOSITORY_ID required")
+			return 2
+		}
+		cfg, err := fetchScanConfig(base, *repo, token)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "cannot load repository scan configuration: "+err.Error())
+			return 2
+		}
+		if !cfg.Enabled {
+			fmt.Fprintln(os.Stderr, "scanning disabled for this repository")
+			return 2
+		}
+		selected := []string{}
+		requested := map[string]bool{}
+		f.Visit(func(x *flag.Flag) {
+			if x.Name == "modules" {
+				for _, m := range strings.Split(*mods, ",") {
+					requested[strings.TrimSpace(m)] = true
+				}
+			}
+		})
+		for _, m := range []string{"vaccin", "enetron"} {
+			enabled := (m == "vaccin" && cfg.Vaccin) || (m == "enetron" && cfg.Enetron)
+			if enabled && (len(requested) == 0 || requested[m]) {
+				selected = append(selected, m)
+			}
+			if requested[m] && !enabled {
+				fmt.Fprintln(os.Stderr, m+" disabled by repository configuration")
+				return 2
+			}
+		}
+		if len(selected) == 0 {
+			fmt.Fprintln(os.Stderr, "no enabled modules selected")
+			return 2
+		}
+		*mods = strings.Join(selected, ",")
 	}
 	var b bundle
 	if *fixture != "" {

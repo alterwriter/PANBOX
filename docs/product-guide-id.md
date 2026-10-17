@@ -1,116 +1,132 @@
 # PANBOX - Panduan Produk dan Operator
 
-Versi panduan: 0.1 (pilot, 17 Oktober 2026). PANBOX adalah control plane AppSec self-hosted dari BOXSPLOIT LABS. Panduan ini menjelaskan kemampuan yang sudah ada, cara menjalankannya, dan batas pilot secara eksplisit. Halaman web dan PDF adalah dokumentasi produk, bukan laporan kerentanan.
+Mulai dari peranmu: **operator server** menyiapkan dashboard privat sekali; **DevOps** menambahkan satu langkah agent-only pada setiap job CI. Agent adalah satu binary Go. Runner tidak perlu Node, Python, Semgrep, Grype, atau instalasi server PANBOX.
 
-## 1. Gambaran umum dan arsitektur
+## 1. Komponen dan lokasi kerja
 
-PANBOX menerima hasil pemindaian native dari agent `panbox`, menyimpan snapshot per repositori dan branch, mengevaluasi quality gate, lalu menampilkan posture, findings, riwayat scan, ekspor teknis, RBAC, dan audit. Server Go menyajikan API dan UI React; PostgreSQL menyimpan data. Agent berjalan di mesin pengembang atau runner CI, bukan di container dashboard.
+```text
+Host Git/CI -> runner terlindungi -> agent PANBOX -> API PANBOX privat -> PostgreSQL
+                                       | VACCIN: aturan source       |
+                                       | ENETRON: paket -> OSV       +-> UI React
+```
 
-VACCIN adalah engine aturan source code buatan PANBOX untuk beberapa pola Python, JavaScript/TypeScript, dan Go. ENETRON adalah parser dependensi versi tetap dan pencocok advisory buatan PANBOX untuk npm lockfile v2/v3, `requirements.txt`, dan `go.mod`. ENETRON mengambil data kerentanan dari API HTTPS yang kompatibel dengan OSV; OSV adalah sumber advisory, bukan executable scanner. Agent tidak menjalankan Semgrep, Grype, atau scanner lain. Cakupan ini sengaja sempit dan belum mencakup analisis dataflow luas.
+**Hasil:** CI menerima status pass, gate gagal, scan tidak lengkap, atau akses ditolak; operator melihat snapshot repo dan branch. File source tetap di runner. ENETRON mengirim nama dan versi paket ke API advisory kompatibel OSV. Agent mengunggah temuan ternormalisasi dan scan key terikat repo ke PANBOX, tanpa potongan source mentah. Lihat [diagram arsitektur dan jaringan](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/docs/architecture.md).
 
-Alur: source Git -> agent PANBOX -> aturan native dan pencocokan dependensi -> bundle normalisasi -> API PANBOX -> PostgreSQL -> dashboard dan keputusan gate. Modul yang gagal atau tidak lengkap tetap partial/unverified dan tidak menghapus snapshot sukses terakhir. Jika tidak ada manifest yang didukung, ENETRON berstatus error, bukan diam-diam pass.
+## 2. Pilih jalur setup
 
-Nilai khas saat ini adalah alur single-tenant ringan dengan logika deteksi milik PANBOX, riwayat repo/branch, status unverified eksplisit, RBAC/key terbatas, serta jalur dari SCM publik ke dashboard privat. Ini bukan klaim cakupan deteksi yang lebih luas. RIDER (secret), TESLA (IaC), AI, MCP, recasting severity, dan template laporan lanjutan belum aktif pada pilot ini.
+- **Operator server, sekali:** siapkan Docker Engine/Desktop dengan Linux containers dan Compose v2. Ikuti bagian 3 untuk Debian/Linux/macOS atau bagian 4 untuk Windows. Debian adalah target produksi awal.
+- **DevOps, per repo:** daftarkan repo, buat scan key, isi secret CI, lalu jalankan bagian 5. Runner perlu HTTPS keluar ke GitHub Releases dan API advisory, serta jalur ke API PANBOX privat.
+- **Tanpa IP/domain publik:** pilih jalur koneksi pada bagian 6 sebelum menulis job CI.
 
-## 2. Prasyarat dan sistem operasi
+PANBOX mengikat HTTP `8080` dan PostgreSQL `5434` ke loopback host. Ubah `PANBOX_HOST_PORT` atau `PANBOX_DB_HOST_PORT` di `.env` jika perlu. Jangan buka PostgreSQL ke internet.
 
-Dashboard: Docker Engine/Desktop dengan Linux containers dan Docker Compose v2. Ini dapat dijalankan di Debian/Linux, macOS, atau Windows; target produksi awal adalah Debian. Host tidak perlu menginstal Node atau Go untuk jalur Docker. CLI dan engine dipasang pada runner/developer host, bukan server dashboard.
+## 3. Jalankan dashboard di Debian/Linux/macOS
 
-Port awal: HTTP `8080` dan PostgreSQL `5434`, keduanya diikat ke loopback host oleh Compose. Ubah `PANBOX_HOST_PORT` atau `PANBOX_DB_HOST_PORT` di `.env` bila perlu. Siapkan penyimpanan persisten untuk volume PostgreSQL. `PANBOX_BOOTSTRAP_PASSWORD` hanya dipakai saat database pertama kali dibuat.
-
-## 3. Instalasi lokal di Debian/Linux/macOS
-
-Dari root folder PANBOX:
+**Tujuan:** hidupkan API dan UI privat sekali di host server:
 
 ```bash
+git clone https://github.com/alterwriter/PANBOX.git
+cd PANBOX
 sh scripts/init-local.sh
 docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
-docker compose --env-file .env -f deploy/docker-compose.yml ps
 curl -fsS http://127.0.0.1:8080/readyz
 ```
 
-`init-local.sh` memakai `/dev/urandom`, membuat secret acak, membatasi izin file melalui `umask 077`, dan menolak overwrite `.env`. Untuk port lain, set `PANBOX_HOST_PORT=8092` sebelum menjalankan script. Buka `http://127.0.0.1:8080` atau port pilihan, lalu masuk memakai `PANBOX_BOOTSTRAP_EMAIL` dan `PANBOX_BOOTSTRAP_PASSWORD` di `.env`. Jangan mengirim atau commit file itu.
+**Hasil yang diharapkan:** `/readyz` berhasil. Buka `http://127.0.0.1:8080` di host server lalu login dengan `PANBOX_BOOTSTRAP_EMAIL` dan `PANBOX_BOOTSTRAP_PASSWORD` dari `.env` yang diabaikan Git. Initializer membuat secret dengan izin terbatas dan menolak menimpa `.env`. Kredensial bootstrap hanya berlaku saat database pertama kali dibuat; simpan volume pada restart rutin.
 
-Untuk fixture demo opsional: `PANBOX_SERVER=http://127.0.0.1:8080 bash scripts/seed-demo.sh`. Script memerlukan `curl` dan `jq`, meminta password admin, serta memuat dua repo dan empat snapshot fiktif. Fixture bukan bukti kerentanan nyata.
+**Demo opsional:** `PANBOX_SERVER=http://127.0.0.1:8080 bash scripts/seed-demo.sh` memerlukan `curl` dan `jq`, lalu meminta password admin. Temuan demo adalah data fiktif.
 
-## 4. Instalasi lokal di Windows
+## 4. Jalankan dashboard di Windows
 
-Gunakan Docker Desktop pada mode Linux containers. Di PowerShell dari root PANBOX:
+**Tujuan:** jalankan container Linux yang sama melalui Docker Desktop. Di PowerShell:
 
 ```powershell
+git clone https://github.com/alterwriter/PANBOX.git
+cd PANBOX
 ./scripts/init-local.ps1
 docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
-docker compose --env-file .env -f deploy/docker-compose.yml ps
 Invoke-RestMethod http://127.0.0.1:8080/readyz
 ```
 
-Gunakan `./scripts/seed-demo.ps1` bila membutuhkan data demo. Script Windows dan Unix menulis format `.env` yang sama; jalankan hanya salah satunya pada instalasi baru.
+**Hasil yang diharapkan:** dashboard dan API sama seperti bagian 3. Jalankan `./scripts/seed-demo.ps1` hanya untuk data demo opsional. Saat membuat `.env` baru, pakai satu initializer saja.
 
-## 5. Repositori SCM, agent native, dan CLI
+## 5. Tambahkan hanya agent ke CI
 
-Di Repositories, pilih GitHub, GitLab, Bitbucket, Azure Repos, Gitea, atau Other Git, lalu masukkan ID/path repositori stabil dari provider tersebut. PANBOX memberi internal repository ID; gunakan untuk `--repo` dan variabel CI `PANBOX_REPOSITORY_ID`. Buat scan key khusus repo dan simpan sebagai `PANBOX_TOKEN` di secret manager CI. Teks Git remote bukan identitas otorisasi.
+**Atur scan policy lebih dulu:** di Repositories -> Scan policy, pilih modul yang diizinkan, ambang gate, dan apakah scan baru aktif. Dashboard PANBOX mengontrol scan online berikutnya, tetapi tidak menyalakan pipeline SCM.
 
-Unduh arsip agent untuk Linux, macOS, atau Windows (amd64/arm64) dari `https://github.com/alterwriter/PANBOX/releases`, verifikasi dengan `SHA256SUMS`, lalu letakkan `panbox`/`panbox.exe` pada PATH runner. Agent berupa satu binary Go dengan aturan bawaan. ENETRON mengirim nama dan versi paket tetap ke API OSV secara default; gunakan `PANBOX_ADVISORY_URL` atau `--advisory-url` untuk mirror kompatibel OSV yang disetujui. Tidak perlu binary scanner eksternal.
+**Sekali di UI PANBOX:** Repositories -> daftarkan repo GitHub, GitLab, Bitbucket, Azure Repos, Gitea, atau Other Git memakai ID/path stabil dari providernya. Salin **ID repo internal PANBOX**. Buat **scan key** repo itu. Simpan sebagai secret CI terlindungi `PANBOX_TOKEN`; isi variabel `PANBOX_REPOSITORY_ID` dan `PANBOX_SERVER` yang bisa dijangkau lewat jaringan privat. Jangan taruh scan key di file repo atau job pull request yang tidak tepercaya.
 
-```bash
-panbox ready --server http://127.0.0.1:8080
-panbox go --server http://127.0.0.1:8080 --repo "$PANBOX_REPOSITORY_ID" --path .
-panbox shutdown
-```
-
-`ready` opsional. `go` mendukung `--branch`, `--commit`, `--base-sha`, `--modules vaccin,enetron`, `--format text|json|sarif`, dan `--offline --output panbox-results.json`. Offline berarti tanpa upload ke dashboard; ENETRON tetap menghubungi API advisory kecuali hanya VACCIN yang dipilih. Exit code: `0` pass, `1` gate fail, `2` scan/transport/konfigurasi tidak lengkap, `3` autentikasi atau izin ditolak. `shutdown` hanya membersihkan cache sementara CLI.
-
-## 6. SCM publik menuju PANBOX privat
-
-Repo publik GitHub, GitLab, Bitbucket, Azure Repos, Gitea, atau Git lain dapat dipindai sementara PANBOX tetap di jaringan privat tanpa IP publik atau domain. Ada tiga pola koneksi:
-
-- Runner lokal terlindungi: runner polling SCM melalui HTTPS keluar dan mengirim hasil ke PANBOX di jaringan lokal. Quality gate sinkron. Contoh GitHub Actions dan GitLab ada di `deploy/github-actions-local-runner.yml` dan `deploy/gitlab-ci-local-runner.yml`.
-- SSH relay: host PANBOX membuka reverse tunnel ke relay SSH yang dapat dijangkau; shared runner membuka forward tunnel ke relay. PANBOX tidak menerima traffic internet masuk. Gate sinkron; `deploy/gitlab-ci-ssh-relay.yml` adalah contoh GitLab untuk pola yang netral provider ini.
-- Pull artifact: CI mengunggah bundle, lalu host PANBOX mengunduh dan mengimpor dengan `panbox go --bundle panbox-results.json`. Jalur ini asinkron dan tidak dapat memblokir CI. `panbox relay-pull` mengotomasi kasus GitLab Jobs API; untuk SCM lain gunakan API artifact atau mekanisme sinkronisasi SCM tersebut sebelum impor bundle yang sama.
-
-Lindungi runner dan branch, dan jangan berikan scan key kepada job pull request yang tidak tepercaya. Pin SSH host key dan batasi identity relay. Repo publik belum tentu membuat artifact publik; gunakan token baca terbatas bila perlu.
-
-## 7. RBAC dan akses repositori
-
-Role `admin` adalah yang tertinggi dan tidak dapat diedit. Admin dapat membuat role custom dengan izin eksplisit, menambahkan user, mengganti role, dan memberi atau mencabut membership per repo di Settings & Audit. Role bawaan meliputi `security_reviewer`, `developer`, `executive_viewer`, dan `scanner_ci`. Akses data memerlukan izin operasi serta akses repo terkait. Role custom tidak boleh memperoleh `rbac:manage`.
-
-Izin pilot: `repos:read`, `repos:write`, `scans:read`, `scans:write`, `findings:read`, `reports:export`, `rbac:manage`, `tokens:manage`, dan `audit:read`. Uji user dengan hak paling kecil sebelum memakai integrasi produksi. Perubahan role atau membership membatasi token yang sudah ada pada permintaan berikutnya.
-
-## 8. API key, access key, dan scan key
-
-Di Settings & Audit -> API & access keys, pilih label, tipe, expiry, scope, dan repositori bila perlu. API key dapat diberi scope integrasi yang dipilih. Access key hanya untuk operasi baca. Scan key dibatasi ke `scans:write` dan satu repositori. Nilai secret hanya terlihat sekali; simpan di secret manager, bukan source atau `.panbox.yml`. Key disimpan sebagai hash, bisa dicabut, dan punya masa berlaku.
-
-Contoh tes baca API:
+**Setiap job Linux/macOS:** ambil installer versi tetap dari [release PANBOX v0.1.0-alpha.5](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.5). Installer memilih OS/CPU, mengunduh hanya binary agent, memeriksa [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.5/SHA256SUMS), lalu memasang di workspace job tanpa sudo:
 
 ```bash
-curl -H "Authorization: Bearer $PANBOX_ACCESS_KEY" http://127.0.0.1:8080/v1/repos
+PANBOX_VERSION=v0.1.0-alpha.5
+curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
+sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
+.panbox/bin/panbox go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path .
 ```
 
-Browser memakai login password, session cookie HttpOnly, dan CSRF token. `api/openapi.yaml` adalah kontrak endpoint pilot. Rotasi key dilakukan dengan membuat key baru, mengganti secret di klien/CI, memastikan koneksi berhasil, lalu mencabut key lama.
+**Hasil yang diharapkan:** exit `0` scan lengkap/pass; `1` gate gagal; `2` scan/transport/konfigurasi tidak lengkap; `3` autentikasi atau izin ditolak. Salin contoh [GitHub Actions](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/github-actions-local-runner.yml) atau [GitLab CI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/gitlab-ci-local-runner.yml). Untuk runner Windows, unduh [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.5/install-agent.ps1), lalu jalankan `./install-agent.ps1 -Version v0.1.0-alpha.5`; hasilnya `./.panbox/bin/panbox.exe` setelah verifikasi checksum. [Binary agent langsung](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.5) juga tersedia.
 
-## 9. Dashboard, findings, gate, dan laporan
+VACCIN memeriksa beberapa pola source Python, JavaScript/TypeScript, dan Go. ENETRON mencocokkan dependensi berversi tetap dari npm lockfile v2/v3, `requirements.txt`, dan `go.mod` dengan data advisory OSV. OSV adalah sumber data, bukan engine scanner. `PANBOX_ADVISORY_URL` atau `--advisory-url` memilih mirror kompatibel OSV. `--offline` meniadakan upload ke dashboard, tetapi ENETRON tetap menghubungi API advisory kecuali hanya `--modules vaccin` yang dipilih.
 
-Overview menampilkan cakupan repo, hitungan severity, status gate, dan waktu scan. Repositories untuk enrollment/key; Findings untuk filter repo/branch/modul/severity; Scans untuk riwayat dan rincian gate; Reports untuk ekspor teknis CSV/JSON; Settings & Audit untuk user, RBAC, key, dan log. Tema light/dark tersedia.
+**Urutan CI ke dashboard:** (1) runner mengunduh agent versi tetap; (2) `panbox go` mengakses `GET /v1/repos/{id}/scan-config` dengan scan key terikat repo; (3) agent memindai modul aktif pada checkout; (4) mengirim satu bundle JSON ke `POST /v1/scans` dengan `Authorization: Bearer $PANBOX_TOKEN`; (5) API menyimpan snapshot dan mengembalikan keputusan gate; (6) agent keluar 0 (lulus), 1 (gate gagal), 2 (tidak lengkap/jaringan), atau 3 (autentikasi). Tidak ada setup upload terpisah. Cek policy dari runner: `curl -fsS -H "Authorization: Bearer $PANBOX_TOKEN" "$PANBOX_SERVER/v1/repos/$PANBOX_REPOSITORY_ID/scan-config"`.
 
-Severity standar tetap `critical`, `high`, `medium`, `low`, `info`. ARK adalah label tampilan untuk Critical/High dan BUG-STER untuk Medium/Low. Raw dan effective severity disimpan, tetapi recasting interaktif belum ada. Partial scan tidak dianggap clean; dashboard mempertahankan last successful scan. Ekspor teknis dibatasi oleh izin `reports:export`.
+## 6. Hubungkan SCM publik ke PANBOX privat
 
-## 10. Operasi, keamanan, dan ukuran resource
+- **Runner lokal terlindungi (disarankan):** polling SCM apa pun lewat HTTPS keluar, lalu mengirim ke PANBOX di LAN. Tidak perlu port PANBOX publik; gate sinkron. Contoh [GitHub](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/github-actions-local-runner.yml) dan [GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/gitlab-ci-local-runner.yml).
+- **SSH relay:** PANBOX membuka reverse tunnel keluar ke relay yang terjangkau; shared runner membuka forward tunnel. PANBOX tidak menerima port internet masuk; gate sinkron. Pin host key dan batasi identity. Lihat [contoh relay GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/gitlab-ci-ssh-relay.yml).
+- **Impor artifact:** CI menulis `panbox-results.json`; host privat mengambil dan mengimpornya belakangan. Tanpa jalur masuk/relay; gate belakangan tidak dapat memblokir job CI itu. [Contoh artifact GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/gitlab-ci-pull-artifact.yml) dan `panbox relay-pull` mengotomasi GitLab; SCM lain memerlukan langkah unduh artifact sebelum impor generik `panbox go --bundle`.
 
-Compose mengikat server dan PostgreSQL ke `127.0.0.1`. Untuk akses dari luar host, gunakan reverse proxy HTTPS dengan kontrol akses atau salah satu jalur privat di atas; set `PANBOX_SECURE_COOKIE=true` bila browser disajikan lewat HTTPS. Simpan backup volume/database dan uji restore sebelum pilot penting. Jangan membuka PostgreSQL ke internet.
+**Cek:** dari runner sinkron, `curl -fsS "$PANBOX_SERVER/readyz"` harus berhasil. Repo publik tidak otomatis membuat artifact CI publik.
 
-Target pilot adalah dashboard plus PostgreSQL pada host 2 GB, dengan satu ingest scan pada satu waktu dan tanpa model AI lokal. Pengukuran fixture kecil di Docker Desktop Windows: server sekitar 5,1 MiB, PostgreSQL 37,3 MiB, median API 7,1 ms dan p95 9,3 ms untuk 100 request berurutan. Angka ini bukan jaminan Debian 2 GB; agent pada runner memerlukan sizing sendiri. Ukur `docker stats --no-stream` dan latency pada host target dengan data representatif.
+## 7. Batasi akses sesuai kebutuhan
 
-## 11. Troubleshooting
+**Setup admin:** Settings & Audit -> RBAC -> buat role dengan izin eksplisit -> assign user -> beri membership repo. `admin` adalah role tertinggi dan tidak dapat diedit. Role bawaan: `security_reviewer`, `developer`, `executive_viewer`, dan `scanner_ci`; role custom tidak dapat diberi `rbac:manage`.
 
-- `/readyz` gagal: periksa `docker compose --env-file .env -f deploy/docker-compose.yml ps` dan `logs db server`; pastikan PostgreSQL sehat.
-- Login gagal setelah mengganti `.env`: bootstrap password hanya dibuat saat database pertama kali diinisialisasi. Jangan hapus volume untuk reset rutin.
-- Gate exit `2`: periksa manifest yang didukung, API advisory, path kerja, endpoint, dan log runner. Partial scan tidak sama dengan pass.
-- Gate exit `3`: periksa expiry/revocation scan key, scope `scans:write`, internal repo ID, role, dan membership.
-- Runner Docker tidak dapat mencapai `127.0.0.1`: loopback di container mengarah ke container itu sendiri; gunakan alamat privat host/container network yang dapat dijangkau.
-- Pull artifact tertinggal: periksa timer, `GITLAB_READ_TOKEN`, ref yang diizinkan, akses Jobs API/artifact, dan state file relay.
+**Cek:** akses data memerlukan izin dan membership repo. Izin pilot: `repos:read`, `repos:write`, `scans:read`, `scans:write`, `findings:read`, `findings:recast`, `reports:export`, `rbac:manage`, `tokens:manage`, dan `audit:read`.
 
-## 12. Batas pilot dan langkah berikutnya
+## 8. Buat API key, access key, dan scan key
 
-Yang tersedia: server/UI, snapshot repo/branch, pemeriksaan source bawaan VACCIN, pencocokan dependensi bawaan ENETRON dengan data OSV, gate, RBAC, key, audit, laporan teknis CSV/JSON, contoh koneksi publik-ke-privat untuk GitHub dan GitLab, serta impor bundle generik. Validasi runner SCM nyata, ketersediaan OSV atau mirror, beban Debian, backup/restore, TLS, dan rotasi credential pada lingkungan target.
+**Lokasi:** Settings & Audit -> API & access keys. Pilih label, tipe, expiry, scope, dan repo bila perlu. API key memiliki scope integrasi terpilih; access key hanya baca; scan key punya `scans:write` untuk satu repo. Salin secret yang tampil sekali ke secret manager. Key disimpan sebagai hash, punya masa berlaku, dan dapat dicabut.
 
-Cakupan deteksi masih sempit: beberapa pola source dan manifest npm/PyPI/Go dengan versi tetap. ENETRON memerlukan jaringan ke API advisory dan menandai severity `info` bila data severity tidak tersedia. RIDER, TESLA, recasting severity dan approval, template PDF findings/eksekutif, AI Security, MCP, OIDC, dan rate limiting API belum tersedia. PDF ini adalah panduan produk, bukan fitur report PANBOX.
+**Tes API baca:**
+
+```bash
+curl -H "Authorization: Bearer $PANBOX_ACCESS_KEY" "$PANBOX_SERVER/v1/repos"
+```
+
+Browser memakai password, session cookie HttpOnly, dan CSRF token. [Kontrak OpenAPI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/api/openapi.yaml) memuat endpoint pilot. Rotasi key: buat baru, perbarui klien, pastikan akses berhasil, lalu cabut key lama.
+
+## 9. Periksa dan kontrol scan di dashboard
+
+**Recast:** Findings -> filter repo dan branch -> Recast -> pilih effective severity atau pulihkan severity scanner -> isi alasan (10-500 karakter) -> Save. Perlu `findings:recast` dan akses repo. Raw severity tidak berubah. Riwayat tersedia di `GET /v1/findings/{id}/recasts`; gate lama memperoleh revisi dengan ambang asli masing-masing scan. Recast bukan persetujuan atau pengabaian temuan.
+
+**Ekspor:** Reports -> pilih repo, branch tepat, modul scan (VACCIN/ENETRON), dan severity opsional -> Export PDF, CSV, atau JSON. Data berasal dari scan lengkap terbaru tiap branch. PDF adalah ringkasan teknis; CSV/JSON menyimpan kolom lengkap. Perlu `reports:export`.
+
+**MCP:** Settings & Audit -> API & access keys -> buat Access key hanya-baca dengan `repos:read`, `scans:read`, dan `findings:read`. Buka Settings & Audit -> MCP setup dan ikuti konfigurasi host stdio generik. Host MCP menjalankan `panbox mcp` dengan `PANBOX_SERVER` dan `PANBOX_TOKEN` di secret environment. Empat tool hanya-baca menampilkan repo, temuan, daftar scan, dan detail scan. Tidak ada endpoint MCP publik.
+
+
+**Setelah CI:** Overview menampilkan cakupan/severity; Repositories menampilkan proyek; Scans menampilkan status run/gate; Findings dapat difilter menurut repo/branch/modul/severity; Reports mengekspor PDF/CSV/JSON teknis terfilter; Settings & Audit menampilkan RBAC, key, dan audit. Tema light dan dark tersedia.
+
+**Arti hasil:** scan parsial tetap unverified dan mempertahankan posture sukses terakhir. ARK menandai Critical/High dan BUG-STER menandai Medium/Low, sementara severity standar tetap disimpan dan diekspor. Recast dan perubahan scan policy tercatat di audit.
+
+## 10. Operasikan sesuai batas pilot
+
+Biarkan PostgreSQL di loopback. Untuk browser jarak jauh, gunakan reverse proxy HTTPS dengan kontrol akses atau jalur privat; set `PANBOX_SECURE_COOKIE=true` pada HTTPS. Backup PostgreSQL dan uji restore.
+
+Host Debian 2 GB adalah **target untuk divalidasi**, bukan jaminan. Fixture kecil Docker Desktop Windows mengukur sekitar 5,1 MiB RAM server dan 37,3 MiB PostgreSQL; 100 panggilan API berurutan menghasilkan median 7,1 ms dan p95 9,3 ms. Agent berada di runner dan butuh sizing terpisah. Ukur `docker stats --no-stream` dengan repo dan bundle yang representatif.
+
+## 11. Telusuri langkah yang gagal
+
+- **Dashboard belum siap:** jalankan `docker compose --env-file .env -f deploy/docker-compose.yml ps` dan `logs db server`; periksa kesehatan PostgreSQL.
+- **Unduhan agent gagal:** periksa tag release, nama asset OS/CPU, akses GitHub keluar, `curl`, dan alat SHA-256. Jangan lewati checksum.
+- **Runner gagal menjangkau PANBOX:** `127.0.0.1` di container menunjuk ke container itu; gunakan alamat host/jaringan privat atau SSH relay.
+- **Exit 2:** cek manifest, endpoint advisory, path kerja, endpoint PANBOX, dan log; tidak lengkap bukan pass.
+- **Exit 3:** cek expiry/revocation scan key, `scans:write`, ID repo internal, role, dan membership.
+- **Impor artifact terlambat:** cek timer, `GITLAB_READ_TOKEN`, ref yang diizinkan, Jobs API/artifact, dan state relay.
+
+## 12. Pahami batas alpha
+
+Yang tersedia: server/UI, pemeriksaan source native VACCIN, pencocokan dependensi tetap native ENETRON dengan data OSV, snapshot repo/branch, gate, RBAC, key berscope, audit, ekspor PDF/CSV/JSON terfilter, serta contoh jalur koneksi di atas. Validasi runner nyata, OSV/mirror, beban Debian, backup/restore, TLS, dan rotasi key di lingkungan target.
+
+Cakupan masih sempit. RIDER secrets, TESLA IaC, alur persetujuan, template PDF eksekutif, AI Security, OIDC, dan rate limiting API masih roadmap. PDF ini panduan produk, bukan laporan kerentanan PANBOX.

@@ -135,6 +135,21 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "database error")
 		return
 	}
+	cfg, err := s.scanConfigFor(in.RepositoryID)
+	if err != nil {
+		fail(w, 404, "repository not found")
+		return
+	}
+	if !cfg.Enabled {
+		fail(w, 409, "scanning disabled for repository")
+		return
+	}
+	for _, m := range in.Modules {
+		if (m.Name == "vaccin" && !cfg.Vaccin) || (m.Name == "enetron" && !cfg.Enetron) {
+			fail(w, 409, "module disabled by repository scan configuration")
+			return
+		}
+	}
 	status := statusOf(in.Modules)
 	modulesJSON, _ := json.Marshal(in.Modules)
 	tx, err := s.DB.BeginTx(r.Context(), nil)
@@ -148,7 +163,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	if status == "complete" {
 		passed = true
 	}
-	_, err = tx.ExecContext(r.Context(), `INSERT INTO scans(id,client_scan_id,repository_id,branch,commit_sha,base_sha,status,module_status,gate_pass) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, in.ClientScanID, in.RepositoryID, in.Git.Branch, in.Git.CommitSHA, in.Git.BaseSHA, status, string(modulesJSON), passed)
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO scans(id,client_scan_id,repository_id,branch,commit_sha,base_sha,status,module_status,gate_pass,policy_version,gate_severity) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, id, in.ClientScanID, in.RepositoryID, in.Git.Branch, in.Git.CommitSHA, in.Git.BaseSHA, status, string(modulesJSON), passed, cfg.Version, cfg.GateSeverity)
 	if err != nil {
 		fail(w, 409, "duplicate scan ID or invalid repository")
 		return
@@ -172,6 +187,15 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "finding save failed")
 			return
 		}
+		var override sql.NullString
+		if err = tx.QueryRowContext(r.Context(), `SELECT recast_severity FROM findings WHERE id=$1`, fid).Scan(&override); err != nil {
+			fail(w, 500, "recast lookup failed")
+			return
+		}
+		effective := f.RawSeverity
+		if override.Valid {
+			effective = override.String
+		}
 		inBase := false
 		if baseID != "" {
 			_ = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM occurrences WHERE scan_id=$1 AND finding_id=$2)`, baseID, fid).Scan(&inBase)
@@ -183,14 +207,14 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		if baseline == "baseline_unknown" {
 			unknownCount++
 		}
-		_, err = tx.ExecContext(r.Context(), `INSERT INTO occurrences(scan_id,finding_id,raw_severity,effective_severity,baseline_status,line) VALUES($1,$2,$3,$3,$4,$5) ON CONFLICT DO NOTHING`, id, fid, f.RawSeverity, baseline, f.Location.Line)
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO occurrences(scan_id,finding_id,raw_severity,effective_severity,baseline_status,line) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, id, fid, f.RawSeverity, effective, baseline, f.Location.Line)
 		if err != nil {
 			fail(w, 500, "occurrence save failed")
 			return
 		}
-		severities = append(severities, f.RawSeverity)
+		severities = append(severities, effective)
 	}
-	gate, gateErr := core.Gate(status, severities)
+	gate, gateErr := core.GateAt(status, severities, cfg.GateSeverity)
 	var gateValue any = nil
 	reasons := []string{}
 	if gateErr != nil {
@@ -198,7 +222,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	} else {
 		gateValue = gate
 		if !gate {
-			reasons = append(reasons, "high or critical finding")
+			reasons = append(reasons, "finding at or above "+cfg.GateSeverity)
 		}
 	}
 	if _, err = tx.ExecContext(r.Context(), `UPDATE scans SET gate_pass=$2 WHERE id=$1`, id, gateValue); err != nil {
@@ -206,7 +230,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reasonsJSON, _ := json.Marshal(reasons)
-	if _, err = tx.ExecContext(r.Context(), `INSERT INTO gate_evaluations(scan_id,revision,policy_version,passed,reasons) VALUES($1,1,1,$2,$3)`, id, gateValue, string(reasonsJSON)); err != nil {
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO gate_evaluations(scan_id,revision,policy_version,passed,reasons) VALUES($1,1,$2,$3,$4)`, id, cfg.Version, gateValue, string(reasonsJSON)); err != nil {
 		fail(w, 500, "gate save failed")
 		return
 	}
@@ -421,8 +445,20 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, 200, map[string]any{"report_id": core.ID(), "generated_at": time.Now().UTC(), "template": "technical-v1", "rows": rows})
 		return
 	}
+	if format == "pdf" {
+		body, err := technicalPDF(rows, r.URL.Query())
+		if err != nil {
+			fail(w, 500, "PDF generation failed")
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", "attachment; filename=panbox-technical.pdf")
+		w.WriteHeader(200)
+		_, _ = w.Write(body)
+		return
+	}
 	if format != "csv" {
-		fail(w, 400, "format must be csv or json")
+		fail(w, 400, "format must be csv, json or pdf")
 		return
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
