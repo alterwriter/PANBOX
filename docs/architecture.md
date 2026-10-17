@@ -19,7 +19,8 @@ flowchart LR
         API -->|scan snapshots, findings, gate, RBAC, audit| DB[(PostgreSQL)]
         UI[React dashboard] -->|same-origin API| API
     end
-    AGENT -->|normalized scan bundle + repo-bound scan key| API
+    AGENT -->|GET scan config + repo-bound key| API
+    AGENT -->|POST normalized scan bundle + same key| API
     BROWSER[Operator browser] -->|loopback or HTTPS reverse proxy| UI
     API -->|pass / fail / incomplete / auth exit outcome| AGENT
 ```
@@ -28,9 +29,10 @@ flowchart LR
 
 1. The runner obtains a Git checkout through its SCM's normal CI flow. The PANBOX server does not clone source or run scanner jobs.
 2. The agent checks selected source patterns with VACCIN and pinned dependency manifests with ENETRON. ENETRON sends **package names and versions** to the configured OSV-compatible advisory API over HTTPS. It does not send source files to that advisory endpoint. The alpha needs that advisory API for ENETRON; `--offline` suppresses dashboard upload only.
-3. The agent sends a normalized JSON bundle to `POST /v1/scans`. It contains repository/branch/commit identity, module status, rule IDs, severities, paths/lines, and short messages. It does not contain raw source snippets. A repository-bound scan key authenticates the upload; the server checks the internal repository ID against the key.
-4. The Go API writes scans, findings, gate results, roles/permissions, key hashes, and audit events to PostgreSQL. The dashboard reads these through the API. A partial or error scan is unverified and does not replace the last successful posture.
-5. The browser reaches the dashboard on loopback by default. Remote browser access needs a private route or an HTTPS reverse proxy. PostgreSQL should remain private.
+3. Before an online scan, the agent sends `GET /v1/repos/{internal-id}/scan-config` with `Authorization: Bearer <scan-key>`. It reads whether scanning is enabled, which modules may run, and the gate threshold. The server validates the key against the internal repository ID. Offline scans skip this fetch and are checked when imported.
+4. The agent sends a normalized JSON bundle to `POST /v1/scans` with the same header. It contains repository/branch/commit identity, module status, rule IDs, severities, paths/lines, and short messages. It does not contain raw source snippets. The server checks module permissions again, writes the snapshot, and returns a gate result. A partial or error scan is unverified and does not replace the last successful posture.
+5. The Go API stores scan policies, scans, findings, severity recast history, gate revisions, roles/permissions, key hashes, and audit events in PostgreSQL. Operators configure scan policy in Repositories, recast findings in Findings, and export filtered CSV/JSON/PDF from Reports. A recast updates effective severity on occurrences and recalculates affected gate revisions using each scan's original threshold; raw severity remains intact.
+6. The browser reaches the dashboard on loopback by default. Remote browser access needs a private route or an HTTPS reverse proxy. PostgreSQL should remain private. A local `panbox mcp` stdio process can expose read-only API data to an MCP host using a scoped access key.
 
 ## Public CI to a dashboard without a public IP
 
@@ -65,3 +67,15 @@ The SSH relay is an internet-reachable intermediary, not a public PANBOX endpoin
 `deploy/docker-compose.yml` runs the Go server and PostgreSQL. The server serves the built React UI and API; it does not invoke the agent. Each CI job can fetch a pinned, agent-only binary from GitHub Releases into its workspace, verify `SHA256SUMS`, scan, and discard the binary with the job. The dashboard host does not distribute or install agent binaries. Server and database bind to host loopback by default. The 2 GB host target remains a sizing hypothesis, not a measured production guarantee; benchmark both the dashboard and runner with representative repositories and scan bundles.
 
 The alpha supports only selected source rules and pinned npm/PyPI/Go manifests. RIDER secret scanning and TESLA IaC scanning are roadmap items. See the [English guide](product-guide-en.md) and [Indonesian guide](product-guide-id.md) for setup, RBAC, and operator steps.
+
+## Codebase map
+
+| Path | Responsibility |
+|---|---|
+| `cmd/panbox` | Single portable agent binary: scan, config fetch, bundle upload, artifact import, and read-only MCP stdio bridge |
+| `internal/scanner` | Native VACCIN/ENETRON detection and normalized finding data |
+| `internal/core` | Stable IDs, fingerprints, severity gate, baseline comparison |
+| `internal/server` | HTTP auth/RBAC, repository policy, scan ingestion, recast, PDF/CSV/JSON export, audit |
+| `migrations` | Idempotent PostgreSQL schema updates applied on server start in numeric order |
+| `web/src` | React dashboard, including triage, scan policy, reports, and MCP setup guidance |
+| `deploy` | Docker Compose and provider-specific CI/network examples |

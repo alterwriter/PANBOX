@@ -5,7 +5,7 @@ panbox_scan:
   stage: test
   tags: [panbox-local]
   variables:
-    PANBOX_VERSION: v0.1.0-alpha.4
+    PANBOX_VERSION: v0.1.0-alpha.5
   script:
     - curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
     - sh install-panbox-agent.sh "$PANBOX_VERSION" "$CI_PROJECT_DIR/.panbox/bin"

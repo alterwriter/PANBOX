@@ -4,7 +4,7 @@ PANBOX is a lightweight, self-hosted AppSec dashboard and native scanning agent 
 
 This is an **alpha preview**. VACCIN and ENETRON are first-party PANBOX implementations with deliberately narrow coverage. VACCIN checks selected Python, JavaScript/TypeScript, and Go source patterns. ENETRON reads pinned npm lockfiles (v2/v3), `requirements.txt`, and `go.mod`, then matches package versions to OSV advisories through the OSV API. OSV supplies advisory data, not a scanner executable. Missing manifests or advisory service failure mark the ENETRON module as error, so the gate is unverified. An advisory without usable severity is reported as `info`. The agent sends package names and versions to the configured advisory endpoint; use `PANBOX_ADVISORY_URL` for an approved OSV-compatible mirror.
 
-RIDER (secrets), TESLA (IaC), AI, MCP, advanced report templates, and broad language/dataflow coverage are not implemented. See the detailed [English guide](docs/product-guide-en.md) and [Indonesian guide](docs/product-guide-id.md).
+RIDER (secrets), TESLA (IaC), AI, approval workflows, executive report templates, and broad language/dataflow coverage are not implemented. A read-only local MCP bridge is available. See the detailed [English guide](docs/product-guide-en.md) and [Indonesian guide](docs/product-guide-id.md).
 
 ## How PANBOX works
 
@@ -14,14 +14,15 @@ flowchart LR
     AGENT --> V[VACCIN native source rules]
     AGENT --> E[ENETRON native dependency matching]
     E -->|package names and versions over HTTPS| OSV[OSV advisory data]
-    AGENT -->|normalized bundle and repo-bound scan key| API[PANBOX Go API]
+    AGENT -->|GET scan policy with repo-bound key| API[PANBOX Go API]
+    AGENT -->|POST normalized bundle with same key| API
     API --> DB[(PostgreSQL)]
     BROWSER[Operator browser] --> UI[React dashboard]
     UI --> API
     API -->|gate outcome| AGENT
 ```
 
-The runner executes detection; the dashboard stores and presents results. PANBOX stays on a private host. A protected runner on its LAN is the simplest synchronous path; an SSH relay also supports a synchronous gate without a public PANBOX IP. Artifact pull/import is asynchronous. See [architecture and trust boundaries](docs/architecture.md) for all three routes and the exact data exchanged.
+The runner executes detection. The dashboard controls whether new scans are allowed, which native modules run, and the gate threshold for each repository. The agent reads this policy before each online CI scan; the dashboard does not start a provider's pipeline. A protected runner on the PANBOX LAN is the simplest synchronous path; an SSH relay also supports a synchronous gate without a public PANBOX IP. Artifact pull/import is asynchronous. See [architecture and trust boundaries](docs/architecture.md) for all three routes and the exact data exchanged.
 
 ## Dashboard setup
 
@@ -48,7 +49,7 @@ The [GitHub Releases page](https://github.com/alterwriter/PANBOX/releases) provi
 On a Linux/macOS CI runner, install only the agent into the job workspace at runtime:
 
 ```bash
-PANBOX_VERSION=v0.1.0-alpha.4
+PANBOX_VERSION=v0.1.0-alpha.5
 curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
 sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 .panbox/bin/panbox go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path .
@@ -66,6 +67,12 @@ PANBOX_TOKEN='<scan-key>' panbox go --server http://127.0.0.1:8080 --repo '<inte
 ```
 
 `panbox go` accepts `--branch`, `--commit`, `--base-sha`, `--modules vaccin,enetron`, `--advisory-url`, and `--format text|json|sarif`. It reads branch names from common GitHub, GitLab, Bitbucket, and Azure CI variables, then falls back to Git. `--offline --output panbox-results.json` writes a bundle without uploading it; **offline refers only to dashboard delivery**. ENETRON still queries the advisory API unless omitted with `--modules vaccin`. An offline bundle may later be imported on a trusted local host with `PANBOX_TOKEN=... panbox go --server ... --bundle panbox-results.json`.
+
+For each **online** scan, the agent authenticates `GET /v1/repos/{id}/scan-config`, scans the enabled modules, then uploads one normalized JSON bundle to `POST /v1/scans` with the same scan key in the `Authorization: Bearer` header. The server checks the repository binding, stores the snapshot, evaluates the configured gate threshold, and returns the verdict. The agent maps it to its process exit code. Use **Repositories -> Scan policy** to pause scans, enable modules, or set the gate threshold. `--modules` may narrow the enabled set, but cannot enable a module disabled by the dashboard. Offline scans cannot fetch policy and their later import is checked against the current server policy.
+
+In **Findings**, a user with `findings:recast` can choose **Recast**, set an effective severity (or restore the scanner value), and enter an audited reason. Raw severity never changes; affected historic gate revisions are recalculated against their original thresholds. **Reports** exports the latest complete snapshots as CSV, JSON, or PDF, filtered by repository, branch, scan module, and severity. The PDF is a readable technical summary; CSV/JSON retain the full row data.
+
+For an MCP host, generate a read-only **Access key** with `repos:read`, `scans:read`, and `findings:read` in **Settings & Audit -> API & access keys**. In **Settings & Audit -> MCP setup**, copy the generic stdio configuration for `panbox mcp`; set `PANBOX_SERVER` and `PANBOX_TOKEN` in the MCP host's secret environment. The bridge exposes read-only repositories, findings, and scans and uses the API's RBAC and repository scope.
 
 Exit codes: `0` complete/pass, `1` complete/gate fail, `2` error or unverified/partial, `3` authentication/authorization rejected. The dashboard preserves the last successful snapshot when a scan is partial. Scans with no supported pinned dependency manifest do not silently pass ENETRON.
 

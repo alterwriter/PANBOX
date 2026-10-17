@@ -17,7 +17,7 @@ jobs:
           persist-credentials: false
       - name: Install agent only from pinned PANBOX release
         env:
-          PANBOX_VERSION: v0.1.0-alpha.4
+          PANBOX_VERSION: v0.1.0-alpha.5
         run: |
           curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o "$RUNNER_TEMP/install-panbox-agent.sh"
           sh "$RUNNER_TEMP/install-panbox-agent.sh" "$PANBOX_VERSION" "$RUNNER_TEMP/panbox-bin"

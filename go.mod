@@ -3,6 +3,7 @@ module panbox
 go 1.24
 
 require (
+	github.com/gpdf-dev/gpdf v1.0.13
 	github.com/jackc/pgx/v5 v5.7.6
 	golang.org/x/crypto v0.40.0
 )

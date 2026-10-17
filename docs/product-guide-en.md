@@ -10,7 +10,7 @@ Git host/CI -> protected runner -> PANBOX agent -> private PANBOX API -> Postgre
                                   | ENETRON: packages -> OSV        +-> React UI
 ```
 
-**Result:** CI receives pass, gate failure, incomplete, or authorization failure; operators see repository and branch snapshots. Source files stay on the runner. ENETRON sends package names and versions to an OSV-compatible advisory API. The agent uploads normalized findings and a repository-bound scan key to PANBOX, without raw source snippets. See the [architecture and network diagram](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/docs/architecture.md).
+**Result:** CI receives pass, gate failure, incomplete, or authorization failure; operators see repository and branch snapshots. Source files stay on the runner. ENETRON sends package names and versions to an OSV-compatible advisory API. The agent uploads normalized findings and a repository-bound scan key to PANBOX, without raw source snippets. See the [architecture and network diagram](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/docs/architecture.md).
 
 ## 2. Choose your setup path
 
@@ -52,26 +52,30 @@ Invoke-RestMethod http://127.0.0.1:8080/readyz
 
 ## 5. Add only the agent to CI
 
+**Set the scan policy first:** in Repositories -> Scan policy, choose allowed modules, a gate threshold, and whether new scans are enabled. The PANBOX dashboard controls the next online CI scan but does not start the provider pipeline.
+
 **Once in PANBOX UI:** Repositories -> enroll a GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or Other Git repository using its stable provider ID/path. Copy the **internal PANBOX repository ID**. Generate its **scan key**. Store it as protected CI secret `PANBOX_TOKEN`; set `PANBOX_REPOSITORY_ID` and a reachable private `PANBOX_SERVER` CI variable. Never put a scan key in repository files or untrusted pull request jobs.
 
-**Every Linux/macOS job:** download the pinned installer from [PANBOX release v0.1.0-alpha.4](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.4). It selects OS/CPU, downloads just the binary, checks [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.4/SHA256SUMS), and installs in the job workspace without sudo:
+**Every Linux/macOS job:** download the pinned installer from [PANBOX release v0.1.0-alpha.5](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.5). It selects OS/CPU, downloads just the binary, checks [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.5/SHA256SUMS), and installs in the job workspace without sudo:
 
 ```bash
-PANBOX_VERSION=v0.1.0-alpha.4
+PANBOX_VERSION=v0.1.0-alpha.5
 curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
 sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 .panbox/bin/panbox go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path .
 ```
 
-**Expected:** exit `0` complete/pass; `1` gate failure; `2` incomplete/transport/config error; `3` rejected auth/permission. Copy the [GitHub Actions job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/github-actions-local-runner.yml) or [GitLab CI job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/gitlab-ci-local-runner.yml). On Windows, download [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.4/install-agent.ps1) and run `./install-agent.ps1 -Version v0.1.0-alpha.4`; it installs `./.panbox/bin/panbox.exe` after checksum verification. [Direct agent-only binaries](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.4) are also available.
+**Expected:** exit `0` complete/pass; `1` gate failure; `2` incomplete/transport/config error; `3` rejected auth/permission. Copy the [GitHub Actions job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/github-actions-local-runner.yml) or [GitLab CI job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/gitlab-ci-local-runner.yml). On Windows, download [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.5/install-agent.ps1) and run `./install-agent.ps1 -Version v0.1.0-alpha.5`; it installs `./.panbox/bin/panbox.exe` after checksum verification. [Direct agent-only binaries](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.5) are also available.
 
 VACCIN checks selected Python, JavaScript/TypeScript, and Go source patterns. ENETRON matches pinned npm lockfiles v2/v3, `requirements.txt`, and `go.mod` dependencies against OSV advisory data. OSV supplies data, not scanner execution. `PANBOX_ADVISORY_URL` or `--advisory-url` selects an approved OSV-compatible mirror. `--offline` suppresses dashboard upload, but ENETRON still contacts the advisory API unless only `--modules vaccin` is selected.
 
+**CI-to-dashboard sequence:** (1) the runner downloads the pinned agent; (2) `panbox go` authenticates `GET /v1/repos/{id}/scan-config` with the repository scan key; (3) the agent scans enabled modules in the checkout; (4) it posts one normalized JSON bundle to `POST /v1/scans` with `Authorization: Bearer $PANBOX_TOKEN`; (5) the API stores the snapshot and returns the gate verdict; (6) the agent exits 0 (pass), 1 (gate fail), 2 (incomplete/transport), or 3 (auth). There is no separate upload setup. Verify the policy from the runner with `curl -fsS -H "Authorization: Bearer $PANBOX_TOKEN" "$PANBOX_SERVER/v1/repos/$PANBOX_REPOSITORY_ID/scan-config"`.
+
 ## 6. Reach private PANBOX from public SCM
 
-- **Local protected runner (recommended):** polls any SCM over outbound HTTPS and posts to PANBOX on its LAN. No public PANBOX port; synchronous gate. Use the [GitHub](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/github-actions-local-runner.yml) or [GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/gitlab-ci-local-runner.yml) example.
-- **SSH relay:** PANBOX opens an outbound reverse tunnel to a reachable relay; a shared runner opens a forward tunnel. No PANBOX inbound internet port; synchronous gate. Pin host keys and restrict identities. See the [GitLab relay example](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/gitlab-ci-ssh-relay.yml).
-- **Artifact import:** CI writes `panbox-results.json`; a private host fetches and imports it later. No inbound route or relay; the later gate cannot block that CI job. [GitLab artifact example](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/deploy/gitlab-ci-pull-artifact.yml) and `panbox relay-pull` automate GitLab; other SCMs need their artifact download step before generic `panbox go --bundle` import.
+- **Local protected runner (recommended):** polls any SCM over outbound HTTPS and posts to PANBOX on its LAN. No public PANBOX port; synchronous gate. Use the [GitHub](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/github-actions-local-runner.yml) or [GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/gitlab-ci-local-runner.yml) example.
+- **SSH relay:** PANBOX opens an outbound reverse tunnel to a reachable relay; a shared runner opens a forward tunnel. No PANBOX inbound internet port; synchronous gate. Pin host keys and restrict identities. See the [GitLab relay example](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/gitlab-ci-ssh-relay.yml).
+- **Artifact import:** CI writes `panbox-results.json`; a private host fetches and imports it later. No inbound route or relay; the later gate cannot block that CI job. [GitLab artifact example](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/deploy/gitlab-ci-pull-artifact.yml) and `panbox relay-pull` automate GitLab; other SCMs need their artifact download step before generic `panbox go --bundle` import.
 
 **Check:** from a synchronous runner, `curl -fsS "$PANBOX_SERVER/readyz"` must work. A public repository does not make its CI artifacts public.
 
@@ -79,7 +83,7 @@ VACCIN checks selected Python, JavaScript/TypeScript, and Go source patterns. EN
 
 **Admin setup:** Settings & Audit -> RBAC -> create a role with explicit permissions -> assign users -> grant repository membership. `admin` is the highest immutable role. Built-in roles include `security_reviewer`, `developer`, `executive_viewer`, and `scanner_ci`; custom roles cannot receive `rbac:manage`.
 
-**Check:** data access needs both permission and repository membership. Pilot permissions are `repos:read`, `repos:write`, `scans:read`, `scans:write`, `findings:read`, `reports:export`, `rbac:manage`, `tokens:manage`, and `audit:read`.
+**Check:** data access needs both permission and repository membership. Pilot permissions are `repos:read`, `repos:write`, `scans:read`, `scans:write`, `findings:read`, `findings:recast`, `reports:export`, `rbac:manage`, `tokens:manage`, and `audit:read`.
 
 ## 8. Create API, access, and scan keys
 
@@ -91,13 +95,20 @@ VACCIN checks selected Python, JavaScript/TypeScript, and Go source patterns. EN
 curl -H "Authorization: Bearer $PANBOX_ACCESS_KEY" "$PANBOX_SERVER/v1/repos"
 ```
 
-Browser login uses password, HttpOnly session cookie, and CSRF token. The [OpenAPI contract](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.4/api/openapi.yaml) lists pilot endpoints. Rotate by creating a new key, updating the client, confirming access, then revoking the old key.
+Browser login uses password, HttpOnly session cookie, and CSRF token. The [OpenAPI contract](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.5/api/openapi.yaml) lists pilot endpoints. Rotate by creating a new key, updating the client, confirming access, then revoking the old key.
 
-## 9. Confirm the scan in the dashboard
+## 9. Confirm and control scans in the dashboard
 
-**After CI:** Overview shows coverage and severity; Repositories shows enrolled projects; Scans shows run/gate status; Findings filters by repository/branch/module/severity; Reports exports technical CSV/JSON; Settings & Audit shows RBAC, keys, and audit events. Light and dark themes are available.
+**Recast:** Findings -> filter to the repository and branch -> Recast -> choose an effective severity or restore the scanner value -> enter a reason (10-500 characters) -> Save. Requires `findings:recast` and repository access. Raw severity never changes. The API exposes history at `GET /v1/findings/{id}/recasts`; affected historic gate revisions are recalculated against each scan's original threshold. Recast is not an approval or dismissal.
 
-**Interpretation:** a partial scan is unverified and preserves the last successful posture. ARK labels Critical/High and BUG-STER labels Medium/Low while standard severities remain stored and exported. Interactive recasting is not implemented in this pilot.
+**Export:** Reports -> choose repository, exact branch, scan module (VACCIN/ENETRON), and optional severity -> Export PDF, CSV, or JSON. Data comes from the latest complete scan per branch. PDF is a readable technical summary; CSV/JSON retain full rows. Requires `reports:export`.
+
+**MCP:** Settings & Audit -> API & access keys -> create a read-only Access key with `repos:read`, `scans:read`, and `findings:read`. Open Settings & Audit -> MCP setup and use its generic stdio host configuration. The MCP host launches `panbox mcp` with `PANBOX_SERVER` and `PANBOX_TOKEN` in its secret environment. Four read-only tools list repositories, findings, scans, and scan detail. There is no public MCP endpoint.
+
+
+**After CI:** Overview shows coverage and severity; Repositories shows enrolled projects; Scans shows run/gate status; Findings filters by repository/branch/module/severity; Reports exports filtered technical PDF/CSV/JSON; Settings & Audit shows RBAC, keys, and audit events. Light and dark themes are available.
+
+**Interpretation:** a partial scan is unverified and preserves the last successful posture. ARK labels Critical/High and BUG-STER labels Medium/Low while standard severities remain stored and exported. Recast actions and changes to scan policy are audited.
 
 ## 10. Operate within the pilot boundary
 
@@ -116,6 +127,6 @@ The 2 GB Debian host is a **target to validate**, not a guarantee. A small Windo
 
 ## 12. Know the alpha limits
 
-Available now: server/UI, native VACCIN source checks, native ENETRON pinned dependency matching with OSV data, repository/branch snapshots, gate, RBAC, scoped keys, audit, CSV/JSON exports, and the transport examples above. Validate real runners, OSV access or approved mirror, Debian load, backup/restore, TLS, and key rotation in your environment.
+Available now: server/UI, native VACCIN source checks, native ENETRON pinned dependency matching with OSV data, repository/branch snapshots, gate, RBAC, scoped keys, audit, filtered PDF/CSV/JSON exports, and the transport examples above. Validate real runners, OSV access or approved mirror, Debian load, backup/restore, TLS, and key rotation in your environment.
 
-Coverage is intentionally narrow. RIDER secrets, TESLA IaC, severity recasting/approval, finding/executive PDF reports, AI Security, MCP, OIDC, and API rate limiting are roadmap items. This PDF is a product guide, not a PANBOX vulnerability report.
+Coverage is intentionally narrow. RIDER secrets, TESLA IaC, approval workflows, executive PDF templates, AI Security, OIDC, and API rate limiting are roadmap items. This PDF is a product guide, not a PANBOX vulnerability report.

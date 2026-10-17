@@ -41,11 +41,18 @@ func Fingerprint(module, rule, filePath, context string) string {
 func ValidSeverity(s string) bool { _, ok := Severities[s]; return ok }
 
 func Gate(status string, severities []string) (bool, error) {
+	return GateAt(status, severities, "high")
+}
+
+func GateAt(status string, severities []string, threshold string) (bool, error) {
 	if status != "complete" {
 		return false, errors.New("scan incomplete")
 	}
+	if !ValidSeverity(threshold) {
+		return false, errors.New("invalid gate threshold")
+	}
 	for _, s := range severities {
-		if Severities[s] >= Severities["high"] {
+		if Severities[s] >= Severities[threshold] {
 			return false, nil
 		}
 	}

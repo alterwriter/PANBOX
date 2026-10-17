@@ -115,6 +115,50 @@ func TestIngestScopeIdempotencyAndReport(t *testing.T) {
 	if posture.Code != 200 || !strings.Contains(posture.Body.String(), `"covered":0`) || !strings.Contains(posture.Body.String(), `"ark":1`) {
 		t.Fatalf("partial scan changed posture incorrectly: %d %s", posture.Code, posture.Body.String())
 	}
+	controlSecret := core.Secret("pb_api_")
+	_, err = s.DB.Exec(`INSERT INTO credentials(id,owner_id,kind,label,secret_hash,scopes,expires_at) VALUES($1,$2,'api','control',$3,'["findings:recast","repos:write","scans:read"]',now()+interval '1 hour')`, core.ID(), user, core.Hash(controlSecret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var findingID string
+	if err = s.DB.QueryRow(`SELECT id FROM findings WHERE repository_id=$1 AND fingerprint='new'`, repoA).Scan(&findingID); err != nil {
+		t.Fatal(err)
+	}
+	if got := call("POST", "/v1/findings/"+findingID+"/recast", readSecret, []byte(`{"severity":"medium","reason":"reviewed exploitability and confirmed lower impact"}`)); got.Code != 403 {
+		t.Fatalf("read key changed severity: %d", got.Code)
+	}
+	recast := call("POST", "/v1/findings/"+findingID+"/recast", controlSecret, []byte(`{"severity":"medium","reason":"reviewed exploitability and confirmed lower impact"}`))
+	if recast.Code != 200 {
+		t.Fatalf("recast failed: %d %s", recast.Code, recast.Body.String())
+	}
+	var featureResult struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(result.Body.Bytes(), &featureResult)
+	updated := call("GET", "/v1/scans/"+featureResult.ID, readSecret, nil)
+	if updated.Code != 200 || !strings.Contains(updated.Body.String(), `"gate_pass":true`) || !strings.Contains(updated.Body.String(), `"gate_revision":2`) {
+		t.Fatalf("gate did not follow recast: %d %s", updated.Code, updated.Body.String())
+	}
+	pdf := call("GET", "/v1/reports/technical?format=pdf&repository_id="+repoA+"&branch=feature/test&module=vaccin", readSecret, nil)
+	if pdf.Code != 200 || !bytes.HasPrefix(pdf.Body.Bytes(), []byte("%PDF-")) {
+		t.Fatalf("filtered PDF invalid: %d", pdf.Code)
+	}
+	config := call("GET", "/v1/repos/"+repoA+"/scan-config", secret, nil)
+	if config.Code != 200 || !strings.Contains(config.Body.String(), `"gate_severity":"high"`) {
+		t.Fatalf("agent cannot read config: %d %s", config.Code, config.Body.String())
+	}
+	changed := call("PUT", "/v1/repos/"+repoA+"/scan-config", controlSecret, []byte(`{"enabled":false,"vaccin":true,"enetron":true,"gate_severity":"high"}`))
+	if changed.Code != 200 {
+		t.Fatalf("config update failed: %d %s", changed.Code, changed.Body.String())
+	}
+	stopped := call("POST", "/v1/scans", secret, makeBundle(repoA, "disabled-scan", "main", "new-commit", "", nil))
+	if stopped.Code != 409 {
+		t.Fatalf("disabled scan uploaded: %d %s", stopped.Code, stopped.Body.String())
+	}
+	retry := call("POST", "/v1/scans", secret, main)
+	if retry.Code != 200 {
+		t.Fatalf("idempotent retry blocked by new policy: %d", retry.Code)
+	}
 }
 
 func TestAdminCanIssueAndRevokeScopedKey(t *testing.T) {
