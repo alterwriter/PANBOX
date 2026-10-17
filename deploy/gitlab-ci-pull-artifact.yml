@@ -2,9 +2,15 @@
 # This path is asynchronous: it does not block the GitLab pipeline on PANBOX gate.
 panbox_bundle:
   stage: test
-  image: your-registry/panbox-agent:<version>
+  image: alpine:3.22
+  variables:
+    PANBOX_VERSION: v0.1.0-alpha.3
+  before_script:
+    - apk add --no-cache curl
+    - curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
+    - sh install-panbox-agent.sh "$PANBOX_VERSION" "$CI_PROJECT_DIR/.panbox/bin"
   script:
-    - panbox go --offline --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$CI_COMMIT_REF_NAME" --commit "$CI_COMMIT_SHA" --base-sha "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" --output panbox-results.json || test "$?" -eq 2
+    - '"$CI_PROJECT_DIR/.panbox/bin/panbox" go --offline --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$CI_COMMIT_REF_NAME" --commit "$CI_COMMIT_SHA" --base-sha "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" --output panbox-results.json || test "$?" -eq 2'
   artifacts:
     when: always
     paths: [panbox-results.json]

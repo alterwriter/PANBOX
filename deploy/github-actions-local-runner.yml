@@ -1,5 +1,5 @@
 # Copy into .github/workflows/panbox.yml in a repository being scanned.
-# Use an isolated, protected self-hosted runner on the PANBOX LAN.
+# Use an isolated, protected Linux self-hosted runner on the PANBOX LAN.
 # Repository variable: PANBOX_REPOSITORY_ID. Secret: PANBOX_TOKEN.
 name: PANBOX scan
 on:
@@ -8,15 +8,22 @@ on:
   workflow_dispatch:
 jobs:
   scan:
-    runs-on: [self-hosted, panbox-local]
+    runs-on: [self-hosted, linux, panbox-local]
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Install agent only from pinned PANBOX release
+        env:
+          PANBOX_VERSION: v0.1.0-alpha.3
+        run: |
+          curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o "$RUNNER_TEMP/install-panbox-agent.sh"
+          sh "$RUNNER_TEMP/install-panbox-agent.sh" "$PANBOX_VERSION" "$RUNNER_TEMP/panbox-bin"
       - name: Run PANBOX
         env:
           PANBOX_TOKEN: ${{ secrets.PANBOX_TOKEN }}
           PANBOX_REPOSITORY_ID: ${{ vars.PANBOX_REPOSITORY_ID }}
-        run: panbox go --server http://127.0.0.1:8080 --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
+        run: |
+          "$RUNNER_TEMP/panbox-bin/panbox" go --server http://127.0.0.1:8080 --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"

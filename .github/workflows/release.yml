@@ -30,10 +30,12 @@ jobs:
             goos="${target%/*}"
             goarch="${target#*/}"
             name="panbox_${version}_${goos}_${goarch}"
+            agent="panbox-agent_${goos}_${goarch}"
             mkdir -p "dist/$name"
             suffix=""
             if [[ "$goos" == windows ]]; then suffix=".exe"; fi
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "dist/$name/panbox$suffix" ./cmd/panbox
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "dist/$agent$suffix" ./cmd/panbox
+            cp "dist/$agent$suffix" "dist/$name/panbox$suffix"
             if [[ "$goos" == windows ]]; then
               (cd dist && zip -q -r "$name.zip" "$name")
             else
@@ -41,8 +43,9 @@ jobs:
             fi
             rm -rf "dist/$name"
           done
-          (cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS)
+          cp scripts/install-agent.sh scripts/install-agent.ps1 dist/
+          (cd dist && sha256sum panbox-agent_* *.tar.gz *.zip install-agent.sh install-agent.ps1 > SHA256SUMS)
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --prerelease --title "PANBOX agent $GITHUB_REF_NAME" --notes-file docs/release-notes.md
+        run: gh release create "$GITHUB_REF_NAME" dist/panbox-agent_* dist/*.tar.gz dist/*.zip dist/install-agent.sh dist/install-agent.ps1 dist/SHA256SUMS --prerelease --title "PANBOX agent $GITHUB_REF_NAME" --notes-file docs/release-notes.md

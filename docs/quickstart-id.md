@@ -1,5 +1,7 @@
 # Mulai cepat PANBOX
 
+Untuk instalasi baru, ikuti [panduan operator dan DevOps](product-guide-id.md): bagian 3/4 menyiapkan dashboard sekali, bagian 5 menambahkan **agent saja** ke pipeline, dan bagian 6 memilih jalur SCM publik ke PANBOX privat. Contoh di bawah adalah fixture lokal pada mesin pengembangan ini, bukan langkah wajib bagi runner CI.
+
 PANBOX demo lokal sudah berjalan di `http://127.0.0.1:8092`. Email admin dan password acak ada di `.env` lokal yang diabaikan Git. Dua repo demo dan empat scan fixture sudah dimuat.
 
 Untuk menjalankan ulang dari folder `PANBOX`:

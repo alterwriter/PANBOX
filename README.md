@@ -43,7 +43,18 @@ Open `http://127.0.0.1:8080` or the configured `PANBOX_HOST_PORT`, then sign in 
 
 ## Agent binary and scanning
 
-The [GitHub Releases page](https://github.com/alterwriter/PANBOX/releases) provides Linux, macOS, and Windows agent archives for amd64 and arm64, plus `SHA256SUMS`. Download the archive matching the runner, verify its SHA-256 against `SHA256SUMS`, extract `panbox` (or `panbox.exe`), and put it on `PATH`. To build from source: `go build -o bin/panbox ./cmd/panbox`. No host Node, Python, Semgrep, or Grype installation is needed for the agent.
+The [GitHub Releases page](https://github.com/alterwriter/PANBOX/releases) provides **single agent binaries** for Linux, macOS, and Windows on amd64/arm64, plus checksum-verified installers. Archives remain for manual installs. The dashboard is distributed separately through Docker Compose. No host Node, Python, Semgrep, or Grype installation is needed for the agent.
+
+On a Linux/macOS CI runner, install only the agent into the job workspace at runtime:
+
+```bash
+PANBOX_VERSION=v0.1.0-alpha.3
+curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
+sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
+.panbox/bin/panbox go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path .
+```
+
+Set `PANBOX_TOKEN` as a protected CI secret and `PANBOX_SERVER` to an API address the runner can reach. The installer selects OS/CPU and checks the downloaded binary against release `SHA256SUMS`; it does not need sudo. See the [English](docs/product-guide-en.md) or [Indonesian](docs/product-guide-id.md) guide for server setup, Windows, and transport choices. To build from source: `go build -o bin/panbox ./cmd/panbox`.
 
 1. In **Repositories**, choose the SCM provider (GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or Other Git) and enter its stable repository ID/path. PANBOX assigns a separate internal repository ID.
 2. Generate a repository-bound **scan key**. Store it as CI secret `PANBOX_TOKEN`, and set `PANBOX_REPOSITORY_ID` to the PANBOX ID. The server checks the token's repository binding; Git remote text is never trusted as authorization.
