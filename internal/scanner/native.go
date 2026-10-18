@@ -21,7 +21,7 @@ import (
 )
 
 // Version identifies the built-in detection rules and lockfile parser.
-const Version = "0.1.4"
+const Version = "0.1.5"
 
 type Finding struct {
 	Module, RuleID, Severity, Path, Message, Identity string
@@ -374,12 +374,14 @@ func Vaccin(root string) ([]Finding, error) {
 				lineStarts = append(lineStarts, i+1)
 			}
 		}
-		rules := make([]rule, 0, len(codeRules[ext])+len(custom[ext]))
+		extra := extendedRules(ext)
+		rules := make([]rule, 0, len(codeRules[ext])+len(extra)+len(custom[ext]))
 		rules = append(rules, codeRules[ext]...)
+		rules = append(rules, extra...)
 		rules = append(rules, custom[ext]...)
 		for _, r := range rules {
 			candidate := code
-			if literalRuleIDs[r.id] {
+			if literalRuleIDs[r.id] || extendedLiteralRuleIDs[r.id] {
 				candidate = literals
 			}
 			seenLines := map[int]bool{}

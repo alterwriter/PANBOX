@@ -6,7 +6,7 @@ version=${1:?usage: sh install-agent.sh vVERSION [install-directory]}
 destination=${2:-.panbox/bin}
 case "$version" in
   v[0-9]* ) ;;
-  * ) echo "Expected a pinned release tag such as v0.1.0-alpha.5" >&2; exit 2 ;;
+  * ) echo "Expected a pinned release tag such as v0.1.0-alpha.7" >&2; exit 2 ;;
 esac
 case "$version" in
   *[!A-Za-z0-9._-]* ) echo "Invalid release tag" >&2; exit 2 ;;

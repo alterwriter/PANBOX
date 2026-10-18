@@ -20,6 +20,9 @@ import (
 	"panbox/internal/scanner"
 )
 
+// Set by the release workflow. Development builds remain identifiable.
+var releaseVersion = "dev"
+
 type module struct {
 	Name    string `json:"name"`
 	Engine  string `json:"engine"`
@@ -92,6 +95,9 @@ func run(args []string) int {
 		return 2
 	}
 	switch args[0] {
+	case "version", "--version":
+		fmt.Printf("PANBOX agent %s (VACCIN/ENETRON engine %s)\n", releaseVersion, scanner.Version)
+		return 0
 	case "ready":
 		return ready(args[1:])
 	case "go":
@@ -107,7 +113,9 @@ func run(args []string) int {
 		return 2
 	}
 }
-func usage() { fmt.Fprintln(os.Stderr, "panbox ready|go|relay-pull|mcp|shutdown  (see README.md)") }
+func usage() {
+	fmt.Fprintln(os.Stderr, "panbox version|ready|go|relay-pull|mcp|shutdown  (see README.md)")
+}
 func git(path string, args ...string) string {
 	c := exec.Command("git", append([]string{"-C", path}, args...)...)
 	b, err := c.Output()

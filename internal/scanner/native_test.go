@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -106,6 +107,95 @@ func TestVaccinDjangoApplicationAndBundledJavaScript(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing Django findings: %v; got %+v", want, got)
+	}
+}
+
+func TestVaccinExtendedPythonAndJavaScriptRules(t *testing.T) {
+	root := t.TempDir()
+	python := map[string]string{
+		"panbox.python.requests-request-url":        "requests.get(request.GET.get('url'))",
+		"panbox.python.urllib-request-url":          "urllib.request.urlopen(request.POST.get('url'))",
+		"panbox.python.file-response-request":       "FileResponse(open(request.GET.get('file'))) ",
+		"panbox.python.django-httpresponse-request": "HttpResponse(request.GET.get('html'))",
+		"panbox.python.jwt-signature-disabled":      "jwt.decode(token, options={'verify_signature': False})",
+		"panbox.python.jwt-none-algorithm":          "jwt.encode(payload, key, algorithm='none')",
+		"panbox.python.yaml-unsafe-load":            "yaml.unsafe_load(body)",
+		"panbox.python.jsonpickle-decode":           "jsonpickle.decode(body)",
+		"panbox.python.dill-loads":                  "dill.loads(body)",
+		"panbox.python.lxml-entities":               "etree.XMLParser(resolve_entities=True)",
+		"panbox.python.paramiko-autoaddpolicy":      "ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())",
+		"panbox.python.django-rawsql-fstring":       "User.objects.raw(f'SELECT * FROM users WHERE id={uid}')",
+		"panbox.python.django-rawsql-percent":       "RawSQL('SELECT * FROM users WHERE id=%s' % (uid,))",
+		"panbox.python.django-httpredirect-request": "HttpResponseRedirect(request.GET.get('next'))",
+		"panbox.python.flask-template-request":      "render_template_string(request.args.get('template'))",
+		"panbox.python.flask-redirect-request":      "redirect(request.args.get('next'))",
+		"panbox.python.world-writable-chmod":        "os.chmod(path, 0o777)",
+		"panbox.python.flask-hardcoded-secret":      "app.secret_key = 'replace-this-secret-key'",
+	}
+	javascript := map[string]string{
+		"panbox.javascript.node-tls-disabled":       "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'",
+		"panbox.javascript.jwt-ignore-expiration":   "jwt.verify(token, key, {ignoreExpiration: true})",
+		"panbox.javascript.jwt-none-algorithm":      "jwt.sign(payload, key, {algorithm: 'none'})",
+		"panbox.javascript.vm-request-code":         "vm.runInNewContext(req.body.script)",
+		"panbox.javascript.require-request":         "require(req.query.module)",
+		"panbox.javascript.import-request":          "import(req.query.module)",
+		"panbox.javascript.axios-request-url":       "axios.get(req.query.url)",
+		"panbox.javascript.http-request-url":        "https.get(req.query.url)",
+		"panbox.javascript.fs-read-request":         "fs.readFile(req.query.file, callback)",
+		"panbox.javascript.fs-write-request":        "fs.writeFile(req.body.file, data, callback)",
+		"panbox.javascript.sendfile-request":        "res.sendFile(req.query.path)",
+		"panbox.javascript.express-raw-response":    "res.send(req.query.html)",
+		"panbox.javascript.regex-request":           "new RegExp(req.query.pattern)",
+		"panbox.javascript.mongo-where-request":     "db.find({$where: req.query.filter})",
+		"panbox.javascript.buffer-alloc-unsafe":     "Buffer.allocUnsafe(size)",
+		"panbox.javascript.node-weak-hash":          "crypto.createHash('md5')",
+		"panbox.javascript.node-ecb-cipher":         "crypto.createCipheriv('aes-128-ecb', key, iv)",
+		"panbox.javascript.location-header-request": "res.setHeader('Location', req.query.next)",
+		"panbox.javascript.wildcard-cors-header":    "res.setHeader('Access-Control-Allow-Origin', '*')",
+		"panbox.javascript.express-dotfiles-allow":  "express.static(root, {dotfiles: 'allow'})",
+	}
+	for name, examples := range map[string]map[string]string{"app.py": python, "app.js": javascript} {
+		lines := make([]string, 0, len(examples)+2)
+		for _, source := range examples {
+			lines = append(lines, source)
+		}
+		if name == "app.py" {
+			lines = append(lines, "# requests.get(request.GET.get('comment'))", "note = \"yaml.unsafe_load(body)\"")
+		} else {
+			lines = append(lines, "// axios.get(req.query.comment)", "const note = \"Buffer.allocUnsafe(1)\"")
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	findings, err := Vaccin(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range findings {
+		delete(python, f.RuleID)
+		delete(javascript, f.RuleID)
+	}
+	if len(python) != 0 || len(javascript) != 0 {
+		t.Fatalf("missing extended matches: Python=%v JavaScript=%v", python, javascript)
+	}
+	negative := t.TempDir()
+	for name, source := range map[string]string{
+		"safe.py": "# requests.get(request.GET.get('url'))\nnote = \"yaml.unsafe_load(body)\"\nrequests.get('https://example.org')\n",
+		"safe.js": "// axios.get(req.query.url)\nconst note = \"Buffer.allocUnsafe(1)\";\naxios.get('https://example.org');\n",
+	} {
+		if err := os.WriteFile(filepath.Join(negative, name), []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clean, err := Vaccin(negative)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range clean {
+		if strings.HasPrefix(f.RuleID, "panbox.python.requests-request-url") || strings.HasPrefix(f.RuleID, "panbox.python.yaml-unsafe-load") || strings.HasPrefix(f.RuleID, "panbox.javascript.axios-request-url") || strings.HasPrefix(f.RuleID, "panbox.javascript.buffer-alloc-unsafe") {
+			t.Fatalf("comment or string literal triggered extended rule: %+v", f)
+		}
 	}
 }
 
