@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +21,7 @@ import (
 )
 
 // Version identifies the built-in detection rules and lockfile parser.
-const Version = "0.1.0"
+const Version = "0.1.1"
 
 type Finding struct {
 	Module, RuleID, Severity, Path, Message, Identity string
@@ -103,11 +104,11 @@ func loadCustomRules(root string) (map[string][]rule, error) {
 	if len(config.Rules) > 64 {
 		return nil, errors.New("maximum 64 custom rules")
 	}
-	allowed := map[string]bool{".py": true, ".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".go": true}
+	allowed := map[string]bool{".py": true, ".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".go": true, ".java": true, ".php": true}
 	out := map[string][]rule{}
 	seen := map[string]bool{}
 	for _, spec := range config.Rules {
-		if !regexp.MustCompile(`^custom\.[a-z0-9][a-z0-9._-]{0,63}$`).MatchString(spec.ID) || seen[spec.ID] || !validSeverity(spec.Severity) || len(spec.Message) == 0 || len(spec.Message) > 200 || len(spec.Pattern) == 0 || len(spec.Pattern) > 256 || len(spec.Extensions) == 0 || len(spec.Extensions) > 6 {
+		if !regexp.MustCompile(`^custom\.[a-z0-9][a-z0-9._-]{0,63}$`).MatchString(spec.ID) || seen[spec.ID] || !validSeverity(spec.Severity) || len(spec.Message) == 0 || len(spec.Message) > 200 || len(spec.Pattern) == 0 || len(spec.Pattern) > 256 || len(spec.Extensions) == 0 || len(spec.Extensions) > 8 {
 			return nil, fmt.Errorf("invalid custom rule: %s", spec.ID)
 		}
 		seen[spec.ID] = true
@@ -139,6 +140,15 @@ var codeRules = map[string][]rule{
 	".jsx": {{"panbox.javascript.eval", "high", "Dynamic eval executes a string", regexp.MustCompile(`\beval\s*\(`)}},
 	".tsx": {{"panbox.typescript.eval", "high", "Dynamic eval executes a string", regexp.MustCompile(`\beval\s*\(`)}},
 	".go":  {{"panbox.go.shell-command", "medium", "Shell command execution needs input review", regexp.MustCompile(`\bexec\.Command\s*\(\s*"(?:sh|bash)"\s*,\s*"-c"\s*,`)}},
+	".java": {
+		{"panbox.java.runtime-exec", "high", "Runtime command execution needs input review", regexp.MustCompile(`\bRuntime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(`)},
+		{"panbox.java.unsafe-deserialization", "high", "ObjectInputStream can deserialize untrusted objects", regexp.MustCompile(`\bnew\s+ObjectInputStream\s*\(`)},
+	},
+	".php": {
+		{"panbox.php.dynamic-eval", "high", "Dynamic evaluation can execute attacker-controlled PHP", regexp.MustCompile(`\beval\s*\(`)},
+		{"panbox.php.command-execution", "high", "Shell command execution needs input review", regexp.MustCompile(`\b(?:shell_exec|passthru|system|exec)\s*\(`)},
+		{"panbox.php.unsafe-unserialize", "high", "Unserialize can instantiate unsafe objects from untrusted data", regexp.MustCompile(`\bunserialize\s*\(`)},
+	},
 }
 
 func Vaccin(root string) ([]Finding, error) {
@@ -211,7 +221,7 @@ func stripLine(s, ext string) string {
 			}
 			continue
 		}
-		if (c == '#' && ext == ".py") || (c == '/' && i+1 < len(s) && s[i+1] == '/' && ext != ".py") {
+		if (c == '#' && (ext == ".py" || ext == ".php")) || (c == '/' && i+1 < len(s) && s[i+1] == '/' && ext != ".py") {
 			break
 		}
 		if c == '\'' || c == '"' || c == '`' {
@@ -226,7 +236,7 @@ type dependency struct{ ecosystem, name, version, path string }
 
 func dependencies(root string) ([]dependency, error) {
 	paths, err := files(root, func(name string) bool {
-		return name == "package-lock.json" || name == "go.mod" || name == "requirements.txt"
+		return name == "package-lock.json" || name == "go.mod" || name == "requirements.txt" || name == "pom.xml" || name == "gradle.lockfile" || name == "composer.lock"
 	})
 	if err != nil {
 		return nil, err
@@ -316,6 +326,69 @@ func dependencies(root string) ([]dependency, error) {
 			if err := s.Err(); err != nil {
 				return nil, err
 			}
+		case "pom.xml":
+			var pom struct {
+				Dependencies []struct {
+					GroupID    string `xml:"groupId"`
+					ArtifactID string `xml:"artifactId"`
+					Version    string `xml:"version"`
+				} `xml:"dependencies>dependency"`
+				Managed []struct {
+					GroupID    string `xml:"groupId"`
+					ArtifactID string `xml:"artifactId"`
+					Version    string `xml:"version"`
+				} `xml:"dependencyManagement>dependencies>dependency"`
+			}
+			if err := xml.Unmarshal(raw, &pom); err != nil {
+				return nil, fmt.Errorf("%s: %w", p, err)
+			}
+			managed := map[string]string{}
+			for _, dep := range pom.Managed {
+				if dep.GroupID != "" && dep.ArtifactID != "" && pinnedVersion(dep.Version) {
+					managed[dep.GroupID+":"+dep.ArtifactID] = dep.Version
+				}
+			}
+			for _, dep := range pom.Dependencies {
+				name := dep.GroupID + ":" + dep.ArtifactID
+				version := dep.Version
+				if version == "" {
+					version = managed[name]
+				}
+				if dep.GroupID != "" && dep.ArtifactID != "" && pinnedVersion(version) {
+					out = append(out, dependency{"Maven", name, version, p})
+				}
+			}
+		case "gradle.lockfile":
+			s := bufio.NewScanner(bytes.NewReader(raw))
+			for s.Scan() {
+				line := strings.TrimSpace(strings.SplitN(s.Text(), "#", 2)[0])
+				if line == "" || !strings.Contains(line, "=") {
+					continue
+				}
+				coordinate := strings.SplitN(line, "=", 2)[0]
+				parts := strings.Split(coordinate, ":")
+				if len(parts) == 3 && parts[0] != "" && parts[1] != "" && pinnedVersion(parts[2]) {
+					out = append(out, dependency{"Maven", parts[0] + ":" + parts[1], parts[2], p})
+				}
+			}
+			if err := s.Err(); err != nil {
+				return nil, err
+			}
+		case "composer.lock":
+			var lock struct {
+				Packages []struct {
+					Name    string `json:"name"`
+					Version string `json:"version"`
+				} `json:"packages"`
+			}
+			if err := json.Unmarshal(raw, &lock); err != nil {
+				return nil, fmt.Errorf("%s: %w", p, err)
+			}
+			for _, dep := range lock.Packages {
+				if strings.Contains(dep.Name, "/") && pinnedVersion(dep.Version) {
+					out = append(out, dependency{"Packagist", dep.Name, strings.TrimPrefix(dep.Version, "v"), p})
+				}
+			}
 		}
 	}
 	unique := out[:0]
@@ -330,6 +403,10 @@ func dependencies(root string) ([]dependency, error) {
 		return unique[i].ecosystem+unique[i].name+unique[i].path < unique[j].ecosystem+unique[j].name+unique[j].path
 	})
 	return unique, nil
+}
+
+func pinnedVersion(version string) bool {
+	return version != "" && !strings.ContainsAny(version, "$*<>, ")
 }
 
 type advisory struct {
@@ -365,7 +442,7 @@ func Enetron(ctx context.Context, root, endpoint string) ([]Finding, error) {
 		return nil, err
 	}
 	if len(deps) == 0 {
-		return nil, errors.New("no supported pinned dependency manifest found (npm lockfile v2/v3, go.mod, requirements.txt)")
+		return nil, errors.New("no supported dependency manifest found; commit package-lock.json (npm v2/v3), go.mod, pinned requirements.txt, pom.xml, gradle.lockfile, or composer.lock")
 	}
 	if len(deps) > 500 {
 		return nil, errors.New("more than 500 dependencies; split the scan or narrow the path")

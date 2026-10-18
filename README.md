@@ -2,7 +2,7 @@
 
 PANBOX is a lightweight, self-hosted AppSec dashboard and native scanning agent for Git repositories. The Go server serves a React UI and API; PostgreSQL is the only required stateful service. The agent runs on a developer machine or CI runner. It does not execute Semgrep, Grype, or another scanner.
 
-This is an **alpha preview**. VACCIN and ENETRON are first-party PANBOX implementations with deliberately narrow coverage. VACCIN checks selected Python, JavaScript/TypeScript, and Go source patterns. ENETRON reads pinned npm lockfiles (v2/v3), `requirements.txt`, and `go.mod`, then matches package versions to OSV advisories through the OSV API. OSV supplies advisory data, not a scanner executable. Missing manifests or advisory service failure mark the ENETRON module as error, so the gate is unverified. An advisory without usable severity is reported as `info`. The agent sends package names and versions to the configured advisory endpoint; use `PANBOX_ADVISORY_URL` for an approved OSV-compatible mirror.
+This is an **alpha preview**. VACCIN and ENETRON are first-party PANBOX implementations with deliberately narrow coverage. VACCIN checks selected Java, JavaScript/TypeScript, Python, PHP, and Go source patterns. ENETRON reads pinned npm, Python, Go, Maven/Gradle, and Composer manifests, then matches package versions to OSV advisory data over HTTPS. OSV supplies advisory data, not a scanner executable. Missing supported manifests or advisory-service failure mark ENETRON incomplete, so the gate is unverified. An advisory without usable severity is reported as `info`. See the guides for supported lockfiles and current limitations.
 
 RIDER (secrets), TESLA (IaC), AI, approval workflows, executive report templates, and broad language/dataflow coverage are not implemented. A read-only local MCP bridge is available. See the detailed [English guide](docs/product-guide-en.md) and [Indonesian guide](docs/product-guide-id.md).
 
@@ -87,11 +87,11 @@ The repository can be public while PANBOX has no public IP or domain. These tran
 
 | Path | Inbound to PANBOX host | Synchronous CI gate | Example |
 |---|---|---|---|
-| Protected self-hosted runner on the PANBOX LAN | None | Yes | `deploy/github-actions-local-runner.yml`, `deploy/gitlab-ci-local-runner.yml` |
+| Hosted SCM runner to a public HTTPS PANBOX endpoint | HTTPS 443 | Yes | `deploy/github-actions-local-runner.yml`, `deploy/gitlab-ci-local-runner.yml` |
 | Reverse SSH tunnel from PANBOX to a reachable relay, plus a forward tunnel from CI | None | Yes | `deploy/gitlab-ci-ssh-relay.yml` |
 | CI artifact fetched and imported by PANBOX host | None | No | `deploy/gitlab-ci-pull-artifact.yml` (GitLab API), or any SCM artifact download followed by `panbox go --bundle` |
 
-A local runner polls the SCM over outbound HTTPS and posts scan results to PANBOX on its private network. Protect the runner, branch, and API key; do not expose the key to untrusted pull request code. For an SSH relay, pin host keys and restrict both SSH identities. The relay must be publicly reachable, while PANBOX itself needs no inbound route. Artifact pull is asynchronous and cannot enforce a CI gate; the included automated pull implementation currently covers GitLab, while the bundle import works with artifacts from any SCM.
+The hosted-runner templates target a PANBOX API reachable over HTTPS. Protect the API key and never expose it to untrusted pull request code. If PANBOX stays private, use the SSH relay: pin host keys and restrict both SSH identities. The relay must be publicly reachable, while PANBOX itself needs no inbound route. Artifact pull is asynchronous and cannot enforce a CI gate; the included automated pull implementation currently covers GitLab, while bundle import works with artifacts from any SCM.
 
 ## Access control and resources
 

@@ -1,3 +1,13 @@
+## Unreleased
+
+- VACCIN adds first-party source-pattern coverage for Java and PHP; custom rules accept both extensions.
+- ENETRON adds pinned Maven (`pom.xml`), Gradle (`gradle.lockfile`), and Packagist (`composer.lock`) manifests alongside npm, Python, and Go.
+- Hosted CI examples use Alpine with curl installed for GitLab and `ubuntu-latest` for GitHub Actions. Private SCM stays private because checkout remains in the provider's runner.
+- Operator and CI setup guides add server upgrade instructions, configuration-variable tables, and the ENETRON no-manifest diagnosis.
+- Agent scanner version advances to `0.1.1`; agent-only release assets will be published after this change is reviewed and merged.
+
+## v0.1.0-alpha.6
+
 PANBOX v0.1.0-alpha.6 native agent preview for Linux, macOS, and Windows on amd64 and arm64.
 
 This release adds a simpler CI credential path: one PANBOX API key with `scans:write` plus the enrolled PANBOX project ID. Private SCM remains private; the CI runner uses its own checkout credentials. GitLab `CI_DEFAULT_BRANCH` and `PANBOX_DEFAULT_BRANCH` can establish the default even when the first job scans a feature branch. The dashboard adds project edit/archive/restore, key rotation, finding triage/history, and detailed views. Native VACCIN supports reviewed custom rules. Existing alpha scan keys remain accepted for migration.

@@ -1,5 +1,5 @@
 # Copy into .github/workflows/panbox.yml in a repository being scanned.
-# Use an isolated, protected Linux self-hosted runner on the PANBOX LAN.
+# Uses a hosted Linux runner. PANBOX_SERVER must be reachable over HTTPS.
 # Repository variables: PANBOX_REPOSITORY_ID, PANBOX_SERVER. Secret: PANBOX_API_KEY.
 name: PANBOX scan
 on:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 jobs:
   scan:
-    runs-on: [self-hosted, linux, panbox-local]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:

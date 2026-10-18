@@ -50,7 +50,37 @@ Invoke-RestMethod http://127.0.0.1:8080/readyz
 
 **Expected:** the same dashboard and API as section 3. Use `./scripts/seed-demo.ps1` only for optional demo data. Run one initializer for a new `.env`, not both.
 
+### Server variables and dashboard upgrades
+
+| Server `.env` variable | Required | Purpose |
+|---|---:|---|
+| `PANBOX_DB_PASSWORD` | Yes | Strong random PostgreSQL password. |
+| `PANBOX_BOOTSTRAP_EMAIL` / `PANBOX_BOOTSTRAP_PASSWORD` | Yes | Initial admin; password is used only when the database is first created. |
+| `PANBOX_SECURE_COOKIE` | Production | Set `true` when the dashboard uses HTTPS. |
+| `PANBOX_HOST_PORT` / `PANBOX_DB_HOST_PORT` | No | Host ports; defaults `8080` / `5434`, bound to loopback. |
+| `PANBOX_SCM_ALLOWED_HOSTS` | Optional | Comma-separated HTTPS origins allowed for self-hosted SCM metadata checks. |
+
+**Upgrade on Debian/Linux:** back up the database and record the current commit, then rebuild from `main`. Run in the PANBOX clone:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml exec -T db pg_dump -U panbox panbox > "panbox-db-$(date -u +%Y%m%dT%H%M%SZ).sql"
+git rev-parse HEAD > .panbox-previous-version
+git pull --ff-only origin main
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+curl -fsS http://127.0.0.1:8080/readyz
+```
+
+Database migrations run when the new server starts. Keep the backup before upgrading; for a schema-changing rollback, restore the database backup together with the previous code version. Never run `docker compose down -v` during an upgrade.
+
 ## 5. Add only the agent to CI
+
+| CI variable | Store as | Purpose |
+|---|---|---|
+| `PANBOX_SERVER` | Variable | Dashboard URL reachable by the runner, preferably HTTPS. |
+| `PANBOX_REPOSITORY_ID` | Variable | Internal PANBOX project ID from the repository page; not the SCM project ID. |
+| `PANBOX_API_KEY` | Masked/protected secret | PANBOX API key scoped to `scans:write`; no repository token is needed. |
+| `PANBOX_VERSION` | Variable | Pinned agent release tag, for example `v0.1.0-alpha.6`. |
+| `PANBOX_DEFAULT_BRANCH` | Optional | Set when the CI provider does not supply default-branch metadata. |
 
 **Onboarding model:** Enroll a PANBOX project before its first scan. Its project ID routes the upload but is not a secret. One API key with `scans:write` authenticates policy fetch and upload. Private SCM repositories do not need to be made public: CI's checkout credentials fetch source, while PANBOX receives only normalized results.
 
@@ -79,7 +109,7 @@ curl -fsS -H "Authorization: Bearer $PANBOX_API_KEY" \
 {"rules":[{"id":"custom.team.unsafe-call","severity":"medium","message":"Unsafe call needs review","pattern":"unsafeCall\\(","extensions":[".js"]}]}
 ```
 
-The JSON pattern above represents regex `unsafeCall\(`. IDs start with `custom.`; supported extensions are `.py`, `.js`, `.jsx`, `.ts`, `.tsx`, and `.go`. Limit: 64 rules, 256 characters per pattern, 64 KiB file. Rules operate on individual lines after basic comment/string stripping; they are not taint analysis. Keep the rule file under normal code review and test changes on representative repos.
+The JSON pattern above represents regex `unsafeCall\(`. IDs start with `custom.`; supported extensions are `.java`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.php`, and `.go`. Limit: 64 rules, 256 characters per pattern, 64 KiB file. Rules operate on individual lines after basic comment/string stripping; they are not taint analysis. Keep the rule file under normal code review and test changes on representative repos.
 
 **Every Linux/macOS job:** download the pinned installer from [PANBOX release v0.1.0-alpha.6](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.6). It selects OS/CPU, downloads just the binary, checks [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.6/SHA256SUMS), and installs in the job workspace without sudo:
 
@@ -92,7 +122,7 @@ sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 
 **Expected:** exit `0` complete/pass; `1` gate failure; `2` incomplete/transport/config error; `3` rejected auth/permission. Copy the [GitHub Actions job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/github-actions-local-runner.yml) or [GitLab CI job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/gitlab-ci-local-runner.yml). On Windows, download [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.6/install-agent.ps1) and run `./install-agent.ps1 -Version v0.1.0-alpha.6`; it installs `./.panbox/bin/panbox.exe` after checksum verification. [Direct agent-only binaries](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.6) are also available.
 
-VACCIN checks selected Python, JavaScript/TypeScript, and Go source patterns. ENETRON matches pinned npm lockfiles v2/v3, `requirements.txt`, and `go.mod` dependencies against OSV advisory data. OSV supplies data, not scanner execution. `PANBOX_ADVISORY_URL` or `--advisory-url` selects an approved OSV-compatible mirror. `--offline` suppresses dashboard upload, but ENETRON still contacts the advisory API unless only `--modules vaccin` is selected.
+VACCIN has a deliberately limited set of source-pattern rules for Java, JavaScript/TypeScript, Python, PHP, and Go; it is not yet equivalent to SonarQube AST/taint analysis. ENETRON supports npm `package-lock.json` v2/v3, Python `requirements.txt` with `==` pins, Go `go.mod`, Maven `pom.xml` with explicit/managed pinned versions, Gradle `gradle.lockfile`, and PHP `composer.lock`. It sends package coordinates and versions to OSV advisory data; OSV supplies data, not scanner execution. `PANBOX_ADVISORY_URL` or `--advisory-url` selects an approved OSV-compatible mirror. Without one of these manifests ENETRON marks the scan incomplete; disable that module in Scan policy for repositories with no dependencies, or commit the appropriate lockfile when the application does have dependencies. For Node, run `npm install --package-lock-only` and commit `package-lock.json`.
 
 **CI-to-dashboard sequence:** (1) the runner downloads the pinned agent; (2) `panbox go` authenticates `GET /v1/repos/{id}/scan-config` with the CI API key; (3) the agent scans enabled modules in the checkout; (4) it posts one normalized JSON bundle to `POST /v1/scans` with `Authorization: Bearer $PANBOX_API_KEY`; (5) the API stores the snapshot and returns the gate verdict; (6) the agent exits 0 (pass), 1 (gate fail), 2 (incomplete/transport), or 3 (auth). There is no separate upload setup. Verify the policy from the runner with `curl -fsS -H "Authorization: Bearer $PANBOX_API_KEY" "$PANBOX_SERVER/v1/repos/$PANBOX_REPOSITORY_ID/scan-config"`.
 
@@ -149,6 +179,7 @@ The 2 GB Debian host is a **target to validate**, not a guarantee. A small Windo
 - **Agent download fails:** check release tag, OS/CPU asset name, outbound GitHub access, `curl`, and SHA-256 tooling. Do not skip the checksum.
 - **Runner cannot reach PANBOX:** `127.0.0.1` inside a container is that container; use its reachable private host/network address or the SSH relay.
 - **Exit 2:** check manifest, advisory endpoint, work path, PANBOX endpoint, and logs; incomplete is not pass.
+- **`no supported dependency manifest` error:** private repositories are supported; this means checkout worked but ENETRON found no supported lockfile. Commit the appropriate lockfile, such as `package-lock.json` for Node, or disable ENETRON in the scan policy for a repository with no dependencies. `partial` and exit `2` keep the gate unverified.
 - **Exit 3:** check API key expiry/revocation, `scans:write`, internal repository ID, role, and membership.
 - **Artifact import is late:** check timer, `GITLAB_READ_TOKEN`, allowed refs, Jobs API/artifact access, and relay state file.
 
