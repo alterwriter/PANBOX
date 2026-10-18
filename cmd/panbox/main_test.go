@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,6 +35,41 @@ func TestGateExitCodes(t *testing.T) {
 				t.Fatalf("got %d want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGoScanSkipsEnetronWhenNoManifestExists(t *testing.T) {
+	root := t.TempDir()
+	output := filepath.Join(t.TempDir(), "bundle.json")
+	code := goScan([]string{
+		"--offline",
+		"--repo", "repo-123",
+		"--path", root,
+		"--branch", "feature/demo",
+		"--default-branch", "main",
+		"--commit", "deadbeef",
+		"--modules", "vaccin,enetron",
+		"--output", output,
+	})
+	if code != 2 { // Offline scans are intentionally unverified until uploaded.
+		t.Fatalf("got exit %d; offline scan must remain unverified", code)
+	}
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result bundle
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Modules) != 2 {
+		t.Fatalf("got %d modules, want vaccin and enetron: %+v", len(result.Modules), result.Modules)
+	}
+	if result.Modules[0].Name != "vaccin" || result.Modules[0].Status != "complete" {
+		t.Fatalf("VACCIN result = %+v, want complete", result.Modules[0])
+	}
+	if result.Modules[1].Name != "enetron" || result.Modules[1].Status != "skipped" || result.Modules[1].Message == "" {
+		t.Fatalf("ENETRON result = %+v, want skipped with explanation", result.Modules[1])
 	}
 }
 

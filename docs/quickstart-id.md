@@ -14,13 +14,15 @@ Kalau membuat instalasi baru, jalankan `./scripts/init-local.ps1 -HostPort 8092`
 
 Di UI:
 
-1. **Repositories → Enroll repository**: pilih provider SCM, isi nama tampilan dan ID/path SCM stabil (contoh `alterwriter/PANBOX`), lalu klik **Test SCM connectivity and detect branch**. Untuk repo publik, default branch terisi otomatis; untuk repo privat biarkan **Auto-detect** dan CI akan mengirim default branch saat upload pertama, meski scan berjalan dari feature branch. Owner boleh kosong. PANBOX tidak otomatis membuat repo dari scan pertama.
+1. **Repo GitHub/GitLab privat:** Admin membuka **Settings & Audit → SCM connections**, memasang GitHub App atau token service account GitLab `read_api`, lalu klik **Connect, test and discover**. PANBOX otomatis mendaftarkan repo yang dapat diakses dan membaca default branch (maksimal 500 per sync). Untuk SCM lain atau enrollment manual, buka **Repositories → Enroll repository** dan klik **Test SCM connectivity and detect branch**. Tanpa koneksi SCM yang dapat membaca repo privat, biarkan **Auto-detect**; CI akan mengirim default branch saat upload pertama. Owner boleh kosong. Upload scan sendiri tidak membuat repo.
 2. Salin **PANBOX ID for CI** dari dialog hasil atau kolom tabel Repositories. Ini ID internal PANBOX, berbeda dari path SCM. Isi variabel CI `PANBOX_REPOSITORY_ID` dengan ID ini.
 3. **Create CI API key** pada dialog hasil atau baris repo. Pakai `scans:write`, batasi proyek jika perlu, dan simpan secret sebagai variabel CI `PANBOX_API_KEY` yang masked/protected. Tidak ada token repo tambahan; key dapat dirotasi atau dicabut di **Settings & Audit → API & access keys**.
 4. **Scan policy**: pilih modul, ambang gate, dan apakah scan baru aktif. Isi `PANBOX_SERVER` dengan URL API yang bisa dijangkau runner; agent mengambil policy sebelum scan online.
 5. **Settings & Audit → RBAC**: buat role, assign user, lalu atur akses repo per user. `admin` tetap role tertinggi.
 6. **Settings & Audit → API & access keys**: API key untuk integrasi dengan scope eksplisit; access key hanya untuk operasi baca. Nilai key hanya terlihat sekali.
 7. **Findings → Recast severity** ada di samping rule temuan pada kolom pertama. Jika tidak terlihat, cek scan/filter serta izin `findings:recast` dan membership repo. **Reports** mengekspor PDF/CSV/JSON menurut repo, branch, modul, dan severity. **Settings & Audit → MCP setup** memuat konfigurasi bridge hanya-baca.
+
+Untuk menguji Django seperti [`django.nv`](https://github.com/alterwriter/django.nv), jalankan agent terbaru dengan VACCIN aktif pada checkout repo, lalu buka Findings. Agent memeriksa Python dan HTML di bawah `templates/`; bundel JS yang dikenal dilewati. Scan lama tetap tersimpan sehingga perlu scan baru untuk melihat rule dan saran remediasi terbaru.
 
 Tiap scan melaporkan branch checkout secara otomatis; branch fitur muncul setelah job CI menjalankan PANBOX di branch itu. GitLab `CI_DEFAULT_BRANCH` atau `PANBOX_DEFAULT_BRANCH` untuk CI lain menentukan baseline Overview. Tes SCM di dashboard berbeda dari tes checkout SCM dan koneksi API di runner. HTTP 403 `repository denied` berarti PANBOX project ID, scope key, atau akses pemilik key tidak cocok; repo SCM privat tetap didukung.
 

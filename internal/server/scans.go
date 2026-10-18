@@ -19,6 +19,7 @@ type moduleInput struct {
 	Engine  string `json:"engine"`
 	Version string `json:"version"`
 	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
 }
 type findingInput struct {
 	Module      string `json:"module"`
@@ -67,8 +68,11 @@ func validScan(in scanInput) error {
 		}
 		seen[m.Name] = true
 		completed[m.Name] = m.Status == "complete"
-		if m.Status != "complete" && m.Status != "error" {
+		if m.Status != "complete" && m.Status != "error" && m.Status != "skipped" {
 			return errors.New("invalid module status")
+		}
+		if len(m.Message) > 200 || containsSecret(m.Message) {
+			return errors.New("invalid module message")
 		}
 	}
 	for _, f := range in.Findings {
@@ -82,18 +86,24 @@ func validScan(in scanInput) error {
 	return nil
 }
 func statusOf(modules []moduleInput) string {
-	complete, errors := 0, 0
+	complete, skipped, errors := 0, 0, 0
 	for _, m := range modules {
-		if m.Status == "complete" {
+		switch m.Status {
+		case "complete":
 			complete++
-		} else {
+		case "skipped":
+			skipped++
+		default:
 			errors++
 		}
 	}
-	if errors == 0 {
+	if errors == 0 && complete > 0 {
 		return "complete"
 	}
 	if complete == 0 {
+		if skipped > 0 && errors == 0 {
+			return "partial"
+		}
 		return "error"
 	}
 	return "partial"

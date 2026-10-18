@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -62,6 +63,49 @@ func TestVaccinExpandedLanguageFamilies(t *testing.T) {
 	}
 	if len(wanted) != 0 {
 		t.Fatalf("missing native rules: %v; got %+v", wanted, got)
+	}
+}
+
+func TestVaccinDjangoApplicationAndBundledJavaScript(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{
+		"taskManager/settings.py":                               "SECRET_KEY = 'replace-me-with-a-runtime-secret'\nDEBUG = True\nMIDDLEWARE = ('django.contrib.sessions.middleware.SessionMiddleware',)\nPASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']\n",
+		"taskManager/views.py":                                  "from django.views.decorators.csrf import csrf_exempt\n@csrf_exempt\ndef upload(request):\n    curs.execute(\n        \"insert into files ('name') values ('%s')\" %\n        (request.POST.get('name'),))\n    return redirect(request.GET.get('next'))\n",
+		"taskManager/templates/taskManager/page.html":           "{{ user.name|safe }}\n",
+		"taskManager/static/taskManager/js/jquery.sparkline.js": "eval(input);\n",
+		"taskManager/static/taskManager/js/app.js":              "eval(input);\n",
+	} {
+		file := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := Vaccin(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"panbox.python.django-hardcoded-secret":        true,
+		"panbox.python.django-debug":                   true,
+		"panbox.python.django-csrf-middleware-missing": true,
+		"panbox.python.django-weak-password-hasher":    true,
+		"panbox.python.django-csrf-disabled":           true,
+		"panbox.python.django-sql-interpolation":       true,
+		"panbox.python.django-open-redirect":           true,
+		"panbox.django.template-safe":                  true,
+		"panbox.javascript.eval":                       true,
+	}
+	for _, f := range got {
+		if filepath.Base(f.Path) == "jquery.sparkline.js" || (f.RuleID == "panbox.python.django-csrf-disabled" && f.Line == 1) {
+			t.Fatalf("vendored or import-only false positive: %+v", f)
+		}
+		delete(want, f.RuleID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing Django findings: %v; got %+v", want, got)
 	}
 }
 
@@ -171,8 +215,8 @@ func TestEnetronFollowsPerQueryOSVPagination(t *testing.T) {
 
 func TestEnetronNoManifestIsUnverified(t *testing.T) {
 	_, err := Enetron(context.Background(), t.TempDir(), "")
-	if err == nil {
-		t.Fatal("missing manifest must not silently pass")
+	if !errors.Is(err, ErrNoDependencyManifest) {
+		t.Fatalf("missing manifest should be reported as not applicable, got %v", err)
 	}
 }
 

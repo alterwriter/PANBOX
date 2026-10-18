@@ -1,5 +1,7 @@
-# Copy this job into .gitlab-ci.yml. It runs on a hosted Linux runner and
-# downloads only the PANBOX agent. The dashboard must be reachable over HTTPS.
+# Optional standalone example: it runs on a hosted Linux runner and downloads
+# only the PANBOX agent. To save shared-runner minutes, put the agent invocation
+# into an existing protected build job instead of adding a second CI job.
+# The dashboard must be reachable over HTTPS.
 # Keep PANBOX_API_KEY masked and protected; protect every branch that can scan.
 panbox_scan:
   stage: test
@@ -13,6 +15,6 @@ panbox_scan:
     - curl -fsS "$PANBOX_SERVER/readyz"
     - curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
     - sh install-panbox-agent.sh "$PANBOX_VERSION" "$CI_PROJECT_DIR/.panbox/bin"
-    - '"$CI_PROJECT_DIR/.panbox/bin/panbox" go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$CI_COMMIT_REF_NAME" --default-branch "$CI_DEFAULT_BRANCH" --commit "$CI_COMMIT_SHA" --base-sha "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}"'
+    - '"$CI_PROJECT_DIR/.panbox/bin/panbox" go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$CI_COMMIT_REF_NAME" --default-branch "$CI_DEFAULT_BRANCH" --commit "$CI_COMMIT_SHA" --base-sha "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" --modules "${PANBOX_MODULES:-vaccin,enetron}"'
   rules:
     - if: '$CI_COMMIT_REF_PROTECTED == "true"'
