@@ -30,8 +30,49 @@ func findingGuidance(module, ruleID string) (string, string) {
 		return "", "Replace eval with explicit parsing or a bounded dispatch table. Treat untrusted strings as data rather than executable code."
 	case "panbox.go.shell-command":
 		return "", "Avoid sh -c/bash -c when arguments may include external input. Execute a fixed binary with separate validated arguments."
+	case "panbox.python.django-debug":
+		return "", "Set DEBUG=False in deployed settings. Keep development overrides separate and confirm the effective setting at startup."
+	case "panbox.python.django-hardcoded-secret", "panbox.python.django-hardcoded-credential":
+		return "", "Rotate the exposed value, remove it from tracked source, and load the replacement from a protected runtime secret. Check prior commits and logs for exposure."
+	case "panbox.python.django-weak-password-hasher":
+		return "", "Use Django's supported adaptive password hashers, keep a strong default first, and plan a password rehash path for existing users."
+	case "panbox.python.django-pickle-session":
+		return "", "Use Django's JSON session serializer and invalidate or migrate existing serialized sessions before rollout. Protect and rotate SECRET_KEY if exposed."
+	case "panbox.python.django-csrf-middleware-missing", "panbox.python.django-csrf-disabled":
+		return "", "Enable CsrfViewMiddleware and remove unnecessary csrf_exempt decorators. Include CSRF tokens in state-changing forms and verify POST requests reject missing tokens."
+	case "panbox.python.django-sql-interpolation", "panbox.python.sql-format", "panbox.python.sql-fstring":
+		return "", "Pass the SQL statement and values separately using bound parameters, or use the Django ORM. Never format request data into SQL text; add a regression test with quotes and special characters."
+	case "panbox.python.django-open-redirect":
+		return "", "Validate the redirect target against permitted hosts and schemes, or map input to a fixed local route. Fall back to a safe path when validation fails."
+	case "panbox.django.template-safe", "panbox.django.autoescape-off":
+		return "", "Keep Django autoescaping enabled and remove safe from untrusted values. If rich HTML is required, sanitize it with an explicit allowlist before rendering."
+	case "panbox.python.django-host-wildcard":
+		return "", "Set ALLOWED_HOSTS to the exact production hostnames and test that unexpected Host headers are rejected."
+	case "panbox.python.django-frame-protection":
+		return "", "Set X_FRAME_OPTIONS to DENY or SAMEORIGIN and confirm the response header is present on sensitive pages."
 	default:
-		return "", "Review the rule match at this location, confirm exploitability in its data flow, then change the code and rerun the scan."
+		if strings.Contains(ruleID, "sql") {
+			return "", "Trace input into this query, replace string construction with bound parameters or a safe query API, and rerun the scan with an injection regression test."
+		}
+		if strings.Contains(ruleID, "shell") || strings.Contains(ruleID, "command") || strings.Contains(ruleID, "exec") {
+			return "", "Check whether external input reaches this execution call. Prefer a fixed executable with separate validated arguments, then test unexpected input."
+		}
+		if strings.Contains(ruleID, "html") || strings.Contains(ruleID, "xss") || strings.Contains(ruleID, "template") {
+			return "", "Keep context-aware output encoding enabled. Remove raw HTML insertion for untrusted data, or sanitize markup with an explicit allowlist and test unsafe characters."
+		}
+		if strings.Contains(ruleID, "ssrf") || strings.Contains(ruleID, "redirect") {
+			return "", "Validate the destination URL against an explicit host and scheme allowlist, reject private or unexpected targets where applicable, and test crafted URLs."
+		}
+		if strings.Contains(ruleID, "pickle") || strings.Contains(ruleID, "deserialize") {
+			return "", "Avoid deserializing untrusted data with executable object formats. Use a constrained data format, validate its schema, and test malformed input."
+		}
+		if strings.Contains(ruleID, "path") || strings.Contains(ruleID, "traversal") {
+			return "", "Resolve the requested path against a fixed base directory, reject paths escaping that base, and test traversal and encoded separators."
+		}
+		if strings.Contains(ruleID, "cookie") || strings.Contains(ruleID, "tls") {
+			return "", "Enable the relevant transport or cookie security setting in deployed configuration and verify the effective runtime behavior."
+		}
+		return "", "Inspect the matched code and its input path. Apply the smallest safe change, add a regression test for the risky behavior, then rerun PANBOX to verify the finding."
 	}
 }
 

@@ -232,7 +232,7 @@ paths:
   /v1/findings/{id}:
     get:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: branch, in: query, required: true, schema: {type: string}}]
-      responses: {'200': {description: Finding detail, remediation, source URL when available, and last 100 eligible complete scans}}
+      responses: {'200': {description: Finding detail with rule-specific or general remediation guidance, source URL when available, and last 100 eligible complete scans. Guidance is advisory and does not establish exploitability.}}
   /v1/findings/{id}/disposition:
     post:
       description: Requires findings:recast. Sets global triage state, records reason, and revises affected gates.

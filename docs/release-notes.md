@@ -1,5 +1,7 @@
 ## Unreleased
 
+- VACCIN adds scoped Django settings, SQL, CSRF, redirect, and template checks; known bundled JavaScript is excluded to reduce noise. A local `django.nv` regression scan produced 25 Python/template findings. The scanner version advances to `0.1.4`; a new agent build is required before CI sees these rules.
+- Finding detail now groups location, scan history, suggested remediation, and audited triage in a responsive panel. Common rule families receive more specific fix guidance.
 - VACCIN expands first-party native rule families across Java/JSP, JavaScript/TypeScript, Python, PHP, and Go; custom rules accept all scanned extensions and regexes can span lines.
 - ENETRON adds pnpm, Yarn, Bun JSON, Pipfile, Poetry, uv, PDM, requirements variants, and Go `go.sum` inputs alongside npm, Maven, Gradle, and Composer.
 - ENETRON batches up to 20,000 pinned dependencies and follows OSV per-query pagination tokens instead of failing on paginated advisory responses.
@@ -7,7 +9,7 @@
 - Adds a detailed detection coverage matrix describing rule families, supported manifests, and alpha limitations.
 - Hosted CI examples use Alpine with curl installed for GitLab and `ubuntu-latest` for GitHub Actions. Private SCM stays private because checkout remains in the provider's runner.
 - Operator and CI setup guides add server upgrade instructions, configuration-variable tables, and the ENETRON no-manifest diagnosis.
-- Agent scanner version advances to `0.1.3`; agent-only release assets will be published after this change is reviewed and merged.
+- Agent-only release assets will be published after this change is reviewed and merged.
 
 ## v0.1.0-alpha.6
 

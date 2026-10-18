@@ -22,6 +22,8 @@ Di UI:
 6. **Settings & Audit → API & access keys**: API key untuk integrasi dengan scope eksplisit; access key hanya untuk operasi baca. Nilai key hanya terlihat sekali.
 7. **Findings → Recast severity** ada di samping rule temuan pada kolom pertama. Jika tidak terlihat, cek scan/filter serta izin `findings:recast` dan membership repo. **Reports** mengekspor PDF/CSV/JSON menurut repo, branch, modul, dan severity. **Settings & Audit → MCP setup** memuat konfigurasi bridge hanya-baca.
 
+Untuk menguji Django seperti [`django.nv`](https://github.com/alterwriter/django.nv), jalankan agent terbaru dengan VACCIN aktif pada checkout repo, lalu buka Findings. Agent memeriksa Python dan HTML di bawah `templates/`; bundel JS yang dikenal dilewati. Scan lama tetap tersimpan sehingga perlu scan baru untuk melihat rule dan saran remediasi terbaru.
+
 Tiap scan melaporkan branch checkout secara otomatis; branch fitur muncul setelah job CI menjalankan PANBOX di branch itu. GitLab `CI_DEFAULT_BRANCH` atau `PANBOX_DEFAULT_BRANCH` untuk CI lain menentukan baseline Overview. Tes SCM di dashboard berbeda dari tes checkout SCM dan koneksi API di runner. HTTP 403 `repository denied` berarti PANBOX project ID, scope key, atau akses pemilik key tidak cocok; repo SCM privat tetap didukung.
 
 Untuk SCM publik ke dashboard lokal tanpa IP publik/domain, jalur termudah adalah runner lokal yang polling SCM melalui HTTPS keluar. Jalur SSH relay bisa membuat quality gate sinkron dari shared runner. Jalur pull artifact tidak memerlukan relay, tetapi hasil gate baru masuk dashboard setelah job selesai. Detail dan contoh YAML ada di [README.md](../README.md) dan folder `deploy/`.

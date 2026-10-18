@@ -1,0 +1,49 @@
+.modal.finding-dialog{width:min(840px,calc(100vw - 32px));padding:0;max-height:calc(100dvh - 36px);overflow:auto;border-radius:20px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.modal.finding-dialog::-webkit-scrollbar{width:8px}
+.modal.finding-dialog::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+.finding-dialog .close{z-index:2;right:23px;top:23px;width:36px;height:36px;border-radius:10px}
+.finding-detail{min-width:0;color:var(--text)}
+.finding-detail-header{padding:30px 36px 24px;background:radial-gradient(circle at 90% 0%,#9279e52b,transparent 42%),var(--surface);border-bottom:1px solid var(--line)}
+.finding-detail-kicker{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 48px 20px 0}
+.finding-detail-kicker .status-badge{text-transform:capitalize}
+.finding-detail-header .eyebrow{margin-bottom:7px!important}
+.finding-detail-header h2{font-size:clamp(21px,3.5vw,29px);line-height:1.18;overflow-wrap:anywhere;margin:0 40px 9px 0}
+.finding-detail-summary{font-size:14px;color:var(--muted);line-height:1.55;margin:0}
+.finding-detail-meta{display:grid;grid-template-columns:1fr 1.35fr 1fr;gap:12px;padding:24px 36px 10px}
+.finding-detail-meta>div{min-width:0;padding:15px;border:1px solid var(--line);border-radius:12px;background:var(--surface2)}
+.finding-detail-meta span{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px;margin-bottom:9px}
+.finding-detail-meta b{display:block;font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.finding-detail-meta small{display:block;color:var(--muted);font-size:11px;margin-top:5px;overflow-wrap:anywhere}
+.finding-detail-links{display:flex;gap:8px;flex-wrap:wrap;padding:7px 36px 5px}
+.finding-detail-links a{display:inline-flex;align-items:center;gap:6px;color:var(--purple);font-size:12px;font-weight:700;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.finding-detail-links a:hover{border-color:var(--purple)}
+.finding-detail-section{margin:16px 36px 0;padding:23px 0;border-top:1px solid var(--line)}
+.finding-section-heading{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:14px}
+.finding-section-heading>div{min-width:0}
+.finding-section-heading h3{font-size:17px;margin:0 0 4px}
+.finding-section-heading p{color:var(--muted);font-size:11px;line-height:1.5;margin:0}
+.finding-section-icon{flex:none;display:grid;place-items:center;width:38px;height:38px;border-radius:10px;color:var(--purple);background:#9076e626}
+.remediation-panel{background:linear-gradient(130deg,#9985e515,transparent 60%);border:1px solid var(--line);border-radius:14px;padding:21px;margin-top:19px}
+.remediation-panel .finding-section-heading{justify-content:flex-start}
+.remediation-panel>p{font-size:13px;line-height:1.65;margin:0 0 15px;overflow-wrap:anywhere}
+.remediation-steps{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.remediation-steps span{display:inline-flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--line);border-radius:999px;padding:6px 9px;font-size:10px;color:var(--muted)}
+.remediation-steps svg{color:var(--green)}
+.finding-timeline{display:grid;gap:0;max-height:180px;overflow:auto}
+.finding-timeline>div{display:grid;grid-template-columns:8px 80px 1fr auto;gap:11px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:11px}
+.finding-timeline>div:last-child{border-bottom:0}
+.finding-timeline b{font-size:11px}
+.finding-timeline span:not(.timeline-dot),.finding-timeline time{color:var(--muted)}
+.timeline-dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+.timeline-dot.resolved{background:var(--muted)}
+.triage-panel{padding-bottom:30px}
+.triage-panel .finding-section-heading .secondary{flex:none}
+.triage-fields{display:grid;grid-template-columns:220px 1fr;gap:14px}
+.triage-fields label{display:block;min-width:0;font-size:11px;font-weight:700;color:var(--text)}
+.triage-fields label small{font-weight:400;color:var(--muted)}
+.triage-fields select,.triage-fields textarea{display:block;width:100%;margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface2);color:var(--text);font:inherit;font-size:12px;outline:none}
+.triage-fields select:focus,.triage-fields textarea:focus{border-color:var(--purple)}
+.triage-fields textarea{min-height:82px;resize:vertical;line-height:1.45}
+.triage-footer{display:flex;align-items:center;justify-content:flex-end;gap:15px;margin-top:12px}
+.triage-footer span{color:var(--muted);font-size:10px}
+@media(max-width:680px){.modal.finding-dialog{width:100%;max-height:calc(100dvh - 20px)}.finding-detail-header{padding:24px 20px 20px}.finding-detail-meta{grid-template-columns:1fr;gap:8px;padding:18px 20px 4px}.finding-detail-meta>div{padding:12px}.finding-detail-links{padding:8px 20px}.finding-detail-section{margin:12px 20px 0}.triage-fields{grid-template-columns:1fr}.triage-panel .finding-section-heading{align-items:flex-start;flex-direction:column}.finding-timeline>div{grid-template-columns:8px 75px 1fr}.finding-timeline time{grid-column:2/4}.finding-dialog .close{right:15px;top:15px}}

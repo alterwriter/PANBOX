@@ -21,7 +21,7 @@ import (
 )
 
 // Version identifies the built-in detection rules and lockfile parser.
-const Version = "0.1.3"
+const Version = "0.1.4"
 
 type Finding struct {
 	Module, RuleID, Severity, Path, Message, Identity string
@@ -191,7 +191,7 @@ func javascriptRules() []rule {
 func init() {
 	additional := map[string][]rule{
 		".py": {
-			{"panbox.python.django-csrf-disabled", "high", "CSRF protection is disabled or exempted", regexp.MustCompile(`\b(?:csrf_exempt|CsrfViewMiddleware)\b|\bCSRF_COOKIE_HTTPONLY\s*=\s*False\b`)},
+			{"panbox.python.django-csrf-disabled", "high", "Django view explicitly bypasses CSRF protection", regexp.MustCompile(`@csrf_exempt\b`)},
 			{"panbox.python.django-host-wildcard", "high", "Wildcard ALLOWED_HOSTS permits untrusted Host headers", regexp.MustCompile(`\bALLOWED_HOSTS\s*=\s*\[[^\]]*["']\*["']`)},
 			{"panbox.python.path-traversal", "high", "File path uses request data; constrain the resolved path", regexp.MustCompile(`\b(?:open|Path)\s*\([^\n]*(?:request\.(?:args|form|json|GET|POST))`)},
 			{"panbox.python.archive-slip", "high", "Archive extraction should validate member paths before writing", regexp.MustCompile(`\b(?:ZipFile|TarFile)\s*\([^\n]*\)\.(?:extractall|extract)\s*\(`)},
@@ -328,6 +328,7 @@ var literalRuleIDs = map[string]bool{
 	"panbox.python.sql-fstring":              true,
 	"panbox.python.sql-format":               true,
 	"panbox.python.django-host-wildcard":     true,
+	"panbox.python.django-open-redirect":     true,
 	"panbox.python.dev-server-exposed":       true,
 }
 
@@ -336,12 +337,20 @@ func Vaccin(root string) ([]Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	paths, err := files(root, func(name string) bool { _, ok := codeRules[filepath.Ext(name)]; return ok })
+	paths, err := files(root, func(name string) bool {
+		_, ok := codeRules[filepath.Ext(name)]
+		return ok || filepath.Ext(name) == ".html"
+	})
 	if err != nil {
 		return nil, err
 	}
 	var out []Finding
 	for _, path := range paths {
+		p := relative(root, path)
+		ext := filepath.Ext(path)
+		if isBundledJavaScript(p) || (ext == ".html" && !isDjangoTemplate(p)) {
+			continue
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return nil, err
@@ -353,8 +362,10 @@ func Vaccin(root string) ([]Finding, error) {
 		if err != nil {
 			return nil, err
 		}
-		p := relative(root, path)
-		ext := filepath.Ext(path)
+		if ext == ".html" {
+			out = append(out, scanDjangoTemplate(p, raw)...)
+			continue
+		}
 		code := stripSource(raw, ext, false)
 		literals := stripSource(raw, ext, true)
 		lineStarts := []int{0}
@@ -382,6 +393,9 @@ func Vaccin(root string) ([]Finding, error) {
 					seenLines[line] = true
 				}
 			}
+		}
+		if ext == ".py" || ext == ".pyw" {
+			out = append(out, scanDjangoPython(p, literals, lineStarts)...)
 		}
 	}
 	return out, nil
