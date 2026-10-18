@@ -3,7 +3,7 @@ param(
     [string]$InstallDirectory = '.panbox/bin'
 )
 $ErrorActionPreference = 'Stop'
-if ($Version -notmatch '^v[0-9][A-Za-z0-9._-]*$') { throw 'Expected a pinned release tag such as v0.1.0-alpha.5' }
+if ($Version -notmatch '^v[0-9][A-Za-z0-9._-]*$') { throw 'Expected a pinned release tag such as v0.1.0-alpha.7' }
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
 if ($architecture -notin @('x64', 'arm64')) { throw "Unsupported CPU architecture: $architecture" }
 $arch = if ($architecture -eq 'x64') { 'amd64' } else { 'arm64' }

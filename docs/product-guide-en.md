@@ -10,7 +10,7 @@ Git host/CI -> protected runner -> PANBOX agent -> private PANBOX API -> Postgre
                                   | ENETRON: packages -> OSV        +-> React UI
 ```
 
-**Result:** CI receives pass, gate failure, incomplete, or authorization failure; operators see repository and branch snapshots. Source files stay on the runner. ENETRON sends package names and versions to an OSV-compatible advisory API. The agent uploads normalized findings with a PANBOX API key, without raw source snippets. See the [architecture and network diagram](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/docs/architecture.md).
+**Result:** CI receives pass, gate failure, incomplete, or authorization failure; operators see repository and branch snapshots. Source files stay on the runner. ENETRON sends package names and versions to an OSV-compatible advisory API. The agent uploads normalized findings with a PANBOX API key, without raw source snippets. See the [architecture and network diagram](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.7/docs/architecture.md).
 
 ## 2. Choose your setup path
 
@@ -87,8 +87,8 @@ Database migrations run when the new server starts. Keep the backup before upgra
 | `PANBOX_SERVER` | Variable | Dashboard URL reachable by the runner, preferably HTTPS. |
 | `PANBOX_REPOSITORY_ID` | Variable | Internal PANBOX project ID from the repository page; not the SCM project ID. |
 | `PANBOX_API_KEY` | Masked/protected secret | PANBOX API key scoped to `scans:write`; no repository token is needed. |
-| `PANBOX_VERSION` | Variable | Pinned agent release tag, for example `v0.1.0-alpha.6`. |
-| `PANBOX_MODULES` | Optional variable | Modules passed to the agent; defaults to `vaccin,enetron` in the GitLab example. Set `vaccin` temporarily for alpha.6 repos without a supported dependency manifest. |
+| `PANBOX_VERSION` | Variable | Pinned agent release tag, for example `v0.1.0-alpha.7`. |
+| `PANBOX_MODULES` | Optional variable | Modules passed to the agent; defaults to `vaccin,enetron` in the GitLab example. Use `vaccin` when you intentionally want SAST only. |
 | `PANBOX_DEFAULT_BRANCH` | Optional | Set when the CI provider does not supply default-branch metadata. |
 
 **Onboarding model:** A connected GitLab service account or GitHub App can enroll permitted private repositories automatically; manual enrollment remains available. Each PANBOX project ID routes uploads but is not a secret. One API key with `scans:write` authenticates policy fetch and upload. CI's checkout credentials fetch source, while PANBOX receives only normalized results.
@@ -120,18 +120,19 @@ curl -fsS -H "Authorization: Bearer $PANBOX_API_KEY" \
 
 The JSON pattern above represents regex `unsafeCall\(`. IDs start with `custom.`; supported extensions are `.py`, `.pyw`, `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs`, `.mts`, `.cts`, `.go`, `.java`, `.jsp`, `.php`, and `.phtml`. Limit: 64 rules, 256 characters per pattern, 64 KiB file. Regexes can span lines after lexical comment/string stripping; they are not AST or taint analysis. Keep the rule file under normal code review and test changes on representative repos. See the [complete alpha detection coverage](detection-coverage.md) for built-in rule families and SCA manifest limits.
 
-**Every Linux/macOS job:** download the pinned installer from [PANBOX release v0.1.0-alpha.6](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.6). It selects OS/CPU, downloads just the binary, checks [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.6/SHA256SUMS), and installs in the job workspace without sudo:
+**Every Linux/macOS job:** download the pinned installer from [PANBOX release v0.1.0-alpha.7](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.7). It selects OS/CPU, downloads just the binary, checks [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.7/SHA256SUMS), and installs in the job workspace without sudo:
 
 ```bash
-PANBOX_VERSION=v0.1.0-alpha.6
+PANBOX_VERSION=v0.1.0-alpha.7
 curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
 sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
+.panbox/bin/panbox version
 .panbox/bin/panbox go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path .
 ```
 
-**Expected:** exit `0` complete/pass; `1` gate failure; `2` incomplete/transport/config error; `3` rejected auth/permission. Copy the [GitHub Actions job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/github-actions-local-runner.yml) or [GitLab CI job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/gitlab-ci-local-runner.yml). On Windows, download [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.6/install-agent.ps1) and run `./install-agent.ps1 -Version v0.1.0-alpha.6`; it installs `./.panbox/bin/panbox.exe` after checksum verification. [Direct agent-only binaries](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.6) are also available.
+**Expected:** exit `0` complete/pass; `1` gate failure; `2` incomplete/transport/config error; `3` rejected auth/permission. Copy the [GitHub Actions job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.7/deploy/github-actions-local-runner.yml) or [GitLab CI job](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.7/deploy/gitlab-ci-local-runner.yml). On Windows, download [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.7/install-agent.ps1) and run `./install-agent.ps1 -Version v0.1.0-alpha.7`; it installs `./.panbox/bin/panbox.exe` after checksum verification. [Direct agent-only binaries](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.7) are also available.
 
-**Keep CI usage low:** add one PANBOX invocation to an existing protected build job after checkout; do not create a second scan/analysis job if shared-runner minutes are limited. PANBOX reads source and dependency manifests from that checkout. It does not scan the built container image. If no dependency manifest exists, the `0.1.3` agent reports ENETRON as `skipped`; with the currently published `v0.1.0-alpha.6` agent, pass `--modules vaccin` until the updated agent release is available. If you only need build/deploy this week, omit PANBOX from CI until you are ready to enable the scan step.
+**Keep CI usage low:** add one PANBOX invocation to an existing protected build job after checkout; do not create a second scan/analysis job if shared-runner minutes are limited. PANBOX reads source and dependency manifests from that checkout. It does not scan the built container image. If no supported manifest exists, ENETRON reports `skipped` and VACCIN can still complete. Use `--modules vaccin` only when you intend to run SAST alone.
 
 VACCIN provides first-party lexical rules for the five supported language families; see the [coverage matrix](detection-coverage.md) for check families and limitations. ENETRON reads npm v1/v2/v3, pnpm, Yarn, Bun JSON locks; Python requirements/Pipfile/Poetry/uv/PDM locks; Go `go.mod`/`go.sum`; Maven `pom.xml`; Gradle `gradle.lockfile`; and PHP `composer.lock`. Maven only reads explicit or locally managed versions, not properties/BOM/parent inheritance. It sends package coordinates and versions to OSV advisory data; OSV supplies data, not scanner execution. Queries are batched and paginated. `PANBOX_ADVISORY_URL` or `--advisory-url` selects an approved OSV-compatible mirror. If no supported dependency manifest exists, ENETRON is recorded as `skipped` and a completed VACCIN scan can still pass; malformed manifests or manifests with no pinned versions remain errors. Feature branches are supported; `baseline unknown` is normal until PANBOX has a prior scan for that branch/base.
 
@@ -139,9 +140,9 @@ VACCIN provides first-party lexical rules for the five supported language famili
 
 ## 6. Reach private PANBOX from public SCM
 
-- **Local protected runner (recommended):** polls any SCM over outbound HTTPS and posts to PANBOX on its LAN. No public PANBOX port; synchronous gate. Use the [GitHub](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/github-actions-local-runner.yml) or [GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/gitlab-ci-local-runner.yml) example.
-- **SSH relay:** PANBOX opens an outbound reverse tunnel to a reachable relay; a shared runner opens a forward tunnel. No PANBOX inbound internet port; synchronous gate. Pin host keys and restrict identities. See the [GitLab relay example](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/gitlab-ci-ssh-relay.yml).
-- **Artifact import:** CI writes `panbox-results.json`; a private host fetches and imports it later. No inbound route or relay; the later gate cannot block that CI job. [GitLab artifact example](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/gitlab-ci-pull-artifact.yml) and `panbox relay-pull` automate GitLab; other SCMs need their artifact download step before generic `panbox go --bundle` import.
+- **Local protected runner (recommended):** polls any SCM over outbound HTTPS and posts to PANBOX on its LAN. No public PANBOX port; synchronous gate. Use the [GitHub](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.7/deploy/github-actions-local-runner.yml) or [GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.7/deploy/gitlab-ci-local-runner.yml) example.
+- **SSH relay:** PANBOX opens an outbound reverse tunnel to a reachable relay; a shared runner opens a forward tunnel. No PANBOX inbound internet port; synchronous gate. Pin host keys and restrict identities. See the [GitLab relay example](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.7/deploy/gitlab-ci-ssh-relay.yml).
+- **Artifact import:** CI writes `panbox-results.json`; a private host fetches and imports it later. No inbound route or relay; the later gate cannot block that CI job. [GitLab artifact example](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.7/deploy/gitlab-ci-pull-artifact.yml) and `panbox relay-pull` automate GitLab; other SCMs need their artifact download step before generic `panbox go --bundle` import.
 
 **Check:** from a synchronous runner, `curl -fsS "$PANBOX_SERVER/readyz"` must work. A public repository does not make its CI artifacts public.
 
@@ -161,7 +162,7 @@ VACCIN provides first-party lexical rules for the five supported language famili
 curl -H "Authorization: Bearer $PANBOX_ACCESS_KEY" "$PANBOX_SERVER/v1/repos"
 ```
 
-Browser login uses password, HttpOnly session cookie, and CSRF token. The [OpenAPI contract](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/api/openapi.yaml) lists pilot endpoints. Use **Rotate** to issue a replacement and revoke the old key atomically; update the CI secret before its next job.
+Browser login uses password, HttpOnly session cookie, and CSRF token. The [OpenAPI contract](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.7/api/openapi.yaml) lists pilot endpoints. Use **Rotate** to issue a replacement and revoke the old key atomically; update the CI secret before its next job.
 
 ## 9. Confirm and control scans in the dashboard
 
@@ -192,7 +193,7 @@ The 2 GB Debian host is a **target to validate**, not a guarantee. A small Windo
 - **Agent download fails:** check release tag, OS/CPU asset name, outbound GitHub access, `curl`, and SHA-256 tooling. Do not skip the checksum.
 - **Runner cannot reach PANBOX:** `127.0.0.1` inside a container is that container; use its reachable private host/network address or the SSH relay.
 - **Exit 2:** check manifest, advisory endpoint, work path, PANBOX endpoint, and logs; incomplete is not pass.
-- **ENETRON skipped:** the repository has no supported dependency manifest; VACCIN can still complete. Add the ecosystem lockfile to enable SCA. With older agent `v0.1.0-alpha.6`, use `--modules vaccin` temporarily if this repository has no dependencies; agent `0.1.3` records ENETRON as skipped automatically.
+- **ENETRON skipped:** the repository has no supported dependency manifest; VACCIN can still complete. Add the ecosystem lockfile to enable SCA. Check `panbox version` to confirm the CI job is using the pinned release.
 - **ENETRON error:** a supported manifest is malformed or has no pinned/resolved versions, or advisory lookup failed. Fix/commit the lockfile or network access; the scan stays unverified.
 - **Exit 3:** check API key expiry/revocation, `scans:write`, internal repository ID, role, and membership.
 - **Artifact import is late:** check timer, `GITLAB_READ_TOKEN`, allowed refs, Jobs API/artifact access, and relay state file.

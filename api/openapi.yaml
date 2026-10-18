@@ -291,5 +291,5 @@ components:
         scope: {type: string, const: repo}
         repository_id: {type: string}
         git: {type: object, required: [branch, commit_sha], properties: {branch: {type: string}, default_branch: {type: string, description: Trusted CI metadata used only when enrolled branch source is ci_pending}, commit_sha: {type: string}, base_sha: {type: string}}}
-        modules: {type: array, items: {type: object, required: [name, status], properties: {name: {type: string, enum: [vaccin, enetron]}, engine: {type: string}, version: {type: string}, status: {type: string, enum: [complete, error]}}}}
+        modules: {type: array, items: {type: object, required: [name, status], properties: {name: {type: string, enum: [vaccin, enetron]}, engine: {type: string, description: Native scanner engine identifier}, version: {type: string, description: Scanner engine version reported by the agent, not the GitHub release tag}, status: {type: string, enum: [complete, error]}}}}
         findings: {type: array, items: {type: object, required: [module, rule_id, raw_severity], properties: {module: {type: string}, rule_id: {type: string}, raw_severity: {type: string, enum: [critical, high, medium, low, info]}, fingerprint: {type: string}, location: {type: object, properties: {path: {type: string}, line: {type: integer}}}, message: {type: string}}}}
