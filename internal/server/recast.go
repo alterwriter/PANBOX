@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -69,10 +70,23 @@ func (s *Server) recastFinding(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "history save failed")
 		return
 	}
-	affected, err := tx.QueryContext(r.Context(), `SELECT DISTINCT s.id,s.status,s.gate_revision,s.gate_severity,s.policy_version FROM scans s JOIN occurrences o ON o.scan_id=s.id WHERE o.finding_id=$1 ORDER BY s.id`, id)
+	affectedCount, err := recalculateFindingGates(r.Context(), tx, id)
 	if err != nil {
-		fail(w, 500, "scan lookup failed")
+		fail(w, 500, "gate recalculation failed")
 		return
+	}
+	if err = tx.Commit(); err != nil {
+		fail(w, 500, "recast commit failed")
+		return
+	}
+	s.audit(r.Context(), who(r).UserID, "finding.recast", id, map[string]any{"from": from, "to": in.Severity, "reason": in.Reason, "affected_scans": affectedCount})
+	jsonOut(w, 200, map[string]any{"id": recastID, "finding_id": id, "severity": in.Severity, "affected_scans": affectedCount})
+}
+
+func recalculateFindingGates(ctx context.Context, tx *sql.Tx, id string) (int, error) {
+	affected, err := tx.QueryContext(ctx, `SELECT DISTINCT s.id,s.status,s.gate_revision,s.gate_severity,s.policy_version FROM scans s JOIN occurrences o ON o.scan_id=s.id WHERE o.finding_id=$1 ORDER BY s.id`, id)
+	if err != nil {
+		return 0, err
 	}
 	type affectedScan struct {
 		id, status, threshold   string
@@ -88,14 +102,12 @@ func (s *Server) recastFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	affected.Close()
 	if err != nil {
-		fail(w, 500, "scan lookup failed")
-		return
+		return 0, err
 	}
 	for _, scan := range scans {
-		severityRows, qerr := tx.QueryContext(r.Context(), `SELECT effective_severity FROM occurrences WHERE scan_id=$1`, scan.id)
+		severityRows, qerr := tx.QueryContext(ctx, `SELECT o.effective_severity FROM occurrences o LEFT JOIN finding_dispositions d ON d.finding_id=o.finding_id WHERE o.scan_id=$1 AND COALESCE(d.status,'open')='open'`, scan.id)
 		if qerr != nil {
-			fail(w, 500, "gate lookup failed")
-			return
+			return 0, qerr
 		}
 		severities := []string{}
 		for severityRows.Next() {
@@ -107,8 +119,7 @@ func (s *Server) recastFinding(w http.ResponseWriter, r *http.Request) {
 		}
 		severityRows.Close()
 		if qerr != nil {
-			fail(w, 500, "gate lookup failed")
-			return
+			return 0, qerr
 		}
 		pass, gateErr := core.GateAt(scan.status, severities, scan.threshold)
 		var verdict any
@@ -122,22 +133,15 @@ func (s *Server) recastFinding(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		revision := scan.revision + 1
-		if _, err = tx.ExecContext(r.Context(), `UPDATE scans SET gate_pass=$2,gate_revision=$3 WHERE id=$1`, scan.id, verdict, revision); err != nil {
-			fail(w, 500, "gate update failed")
-			return
+		if _, err = tx.ExecContext(ctx, `UPDATE scans SET gate_pass=$2,gate_revision=$3 WHERE id=$1`, scan.id, verdict, revision); err != nil {
+			return 0, err
 		}
 		reasonJSON, _ := json.Marshal(reasons)
-		if _, err = tx.ExecContext(r.Context(), `INSERT INTO gate_evaluations(scan_id,revision,policy_version,passed,reasons) VALUES($1,$2,$3,$4,$5)`, scan.id, revision, scan.policyVersion, verdict, string(reasonJSON)); err != nil {
-			fail(w, 500, "gate history failed")
-			return
+		if _, err = tx.ExecContext(ctx, `INSERT INTO gate_evaluations(scan_id,revision,policy_version,passed,reasons) VALUES($1,$2,$3,$4,$5)`, scan.id, revision, scan.policyVersion, verdict, string(reasonJSON)); err != nil {
+			return 0, err
 		}
 	}
-	if err = tx.Commit(); err != nil {
-		fail(w, 500, "recast commit failed")
-		return
-	}
-	s.audit(r.Context(), who(r).UserID, "finding.recast", id, map[string]any{"from": from, "to": in.Severity, "reason": in.Reason, "affected_scans": len(scans)})
-	jsonOut(w, 200, map[string]any{"id": recastID, "finding_id": id, "severity": in.Severity, "affected_scans": len(scans)})
+	return len(scans), nil
 }
 
 func (s *Server) findingRecasts(w http.ResponseWriter, r *http.Request) {

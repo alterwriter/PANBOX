@@ -174,7 +174,7 @@ func (s *Server) repoAllowed(ctx context.Context, p principal, repo string) bool
 		return true
 	}
 	var ok bool
-	_ = s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM repository_members WHERE repository_id=$1 AND user_id=$2)`, repo, p.UserID).Scan(&ok)
+	_ = s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM repository_members m JOIN repositories r ON r.id=m.repository_id WHERE m.repository_id=$1 AND m.user_id=$2 AND r.archived_at IS NULL)`, repo, p.UserID).Scan(&ok)
 	return ok
 }
 func (s *Server) audit(ctx context.Context, actor, action, target string, detail any) {
@@ -291,9 +291,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/credentials", s.protected(s.createCredential))
 	mux.HandleFunc("GET /v1/credentials", s.protected(s.credentials))
 	mux.HandleFunc("DELETE /v1/credentials/{id}", s.protected(s.revokeCredential))
+	mux.HandleFunc("POST /v1/credentials/{id}/rotate", s.protected(s.rotateCredential))
 	mux.HandleFunc("GET /v1/repos", s.protected(s.repos))
 	mux.HandleFunc("POST /v1/repos/inspect", s.protected(s.inspectRepo))
 	mux.HandleFunc("POST /v1/repos", s.protected(s.createRepo))
+	mux.HandleFunc("GET /v1/repos/{id}", s.protected(s.repoDetail))
+	mux.HandleFunc("PUT /v1/repos/{id}", s.protected(s.updateRepo))
+	mux.HandleFunc("DELETE /v1/repos/{id}", s.protected(s.deleteRepo))
+	mux.HandleFunc("POST /v1/repos/{id}/restore", s.protected(s.restoreRepo))
 	mux.HandleFunc("POST /v1/repos/{id}/recheck-scm", s.protected(s.recheckRepoSCM))
 	mux.HandleFunc("POST /v1/repos/{id}/scan-tokens", s.protected(s.scanToken))
 	mux.HandleFunc("GET /v1/repos/{id}/scan-config", s.protected(s.getScanConfig))
@@ -303,7 +308,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/scans", s.protected(s.scans))
 	mux.HandleFunc("POST /v1/scans", s.protected(s.ingest))
 	mux.HandleFunc("GET /v1/scans/{id}", s.protected(s.scan))
+	mux.HandleFunc("GET /v1/scans/{id}/findings", s.protected(s.scanFindings))
 	mux.HandleFunc("GET /v1/findings", s.protected(s.findings))
+	mux.HandleFunc("GET /v1/findings/{id}", s.protected(s.findingDetail))
+	mux.HandleFunc("POST /v1/findings/{id}/disposition", s.protected(s.setFindingDisposition))
+	mux.HandleFunc("GET /v1/findings/{id}/dispositions", s.protected(s.findingDispositionHistory))
 	mux.HandleFunc("POST /v1/findings/{id}/recast", s.protected(s.recastFinding))
 	mux.HandleFunc("GET /v1/findings/{id}/recasts", s.protected(s.findingRecasts))
 	mux.HandleFunc("GET /v1/metrics/overview", s.protected(s.overview))
@@ -677,7 +686,8 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
 	if !require(w, r, "repos:read") {
 		return
 	}
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,name,provider,provider_project_id,default_branch,owner,scm_check_status FROM repositories ORDER BY name`)
+	includeArchived := who(r).Admin && r.URL.Query().Get("include_archived") == "1"
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,name,provider,provider_project_id,scm_base_url,default_branch,default_branch_source,owner,scm_check_status,archived_at FROM repositories WHERE archived_at IS NULL OR $1 ORDER BY name`, includeArchived)
 	if err != nil {
 		fail(w, 500, "database error")
 		return
@@ -685,10 +695,15 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []any{}
 	for rows.Next() {
-		var id, name, provider, project, branch, owner, checkStatus string
-		_ = rows.Scan(&id, &name, &provider, &project, &branch, &owner, &checkStatus)
+		var id, name, provider, project, baseURL, branch, branchSource, owner, checkStatus string
+		var archived sql.NullTime
+		if err := rows.Scan(&id, &name, &provider, &project, &baseURL, &branch, &branchSource, &owner, &checkStatus, &archived); err != nil {
+			fail(w, 500, "repository list failed")
+			return
+		}
 		if s.repoAllowed(r.Context(), who(r), id) {
-			out = append(out, map[string]string{"id": id, "name": name, "provider": provider, "provider_project_id": project, "default_branch": branch, "owner": owner, "scm_check_status": checkStatus})
+			item := map[string]any{"id": id, "name": name, "provider": provider, "provider_project_id": project, "scm_base_url": baseURL, "default_branch": branch, "default_branch_source": branchSource, "owner": owner, "scm_check_status": checkStatus, "archived": archived.Valid}
+			out = append(out, item)
 		}
 	}
 	jsonOut(w, 200, out)
@@ -697,41 +712,36 @@ func (s *Server) createRepo(w http.ResponseWriter, r *http.Request) {
 	if !require(w, r, "repos:write") {
 		return
 	}
-	var in struct {
-		Name              string `json:"name"`
-		Provider          string `json:"provider"`
-		ProviderProjectID string `json:"provider_project_id"`
-		DefaultBranch     string `json:"default_branch"`
-		Owner             string `json:"owner"`
-	}
+	var in repoInput
 	if !decode(w, r, &in) {
 		return
 	}
-	in.Name = strings.TrimSpace(in.Name)
-	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
-	in.ProviderProjectID = strings.TrimSpace(in.ProviderProjectID)
-	in.DefaultBranch = strings.TrimSpace(in.DefaultBranch)
-	in.Owner = strings.TrimSpace(in.Owner)
-	if in.Name == "" || in.ProviderProjectID == "" || !regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`).MatchString(in.Provider) {
-		fail(w, 400, "name, provider and provider repository ID required")
+	if err := normalizeRepoInput(&in); err != nil {
+		fail(w, 400, err.Error())
 		return
 	}
-	check, err := inspectSCM(r.Context(), in.Provider, in.ProviderProjectID)
+	check, err := inspectSCM(r.Context(), in.Provider, in.ProviderProjectID, in.SCMBaseURL)
 	if err != nil {
 		fail(w, 500, "SCM inspection failed")
 		return
 	}
-	if check.Status == "verified" {
-		in.DefaultBranch = check.DefaultBranch
-		if in.Owner == "" {
-			in.Owner = check.Owner
+	if in.BranchMode == "auto" {
+		if check.Status == "verified" {
+			in.DefaultBranch = check.DefaultBranch
+		} else {
+			in.DefaultBranch = ""
+			in.BranchMode = "ci_pending"
 		}
-	} else if in.DefaultBranch == "" {
-		fail(w, 422, "SCM default branch unavailable; test from the CI runner and enter the branch manually")
+	}
+	if in.Owner == "" && check.Status == "verified" {
+		in.Owner = check.Owner
+	}
+	if in.BranchMode != "ci_pending" && !validBranch(in.DefaultBranch) {
+		fail(w, 422, "a valid default branch is required")
 		return
 	}
 	id := core.ID()
-	_, err = s.DB.ExecContext(r.Context(), `INSERT INTO repositories(id,name,provider,provider_project_id,default_branch,owner,scm_check_status,scm_checked_at) VALUES($1,$2,$3,$4,$5,$6,$7,now())`, id, in.Name, in.Provider, in.ProviderProjectID, in.DefaultBranch, in.Owner, check.Status)
+	_, err = s.DB.ExecContext(r.Context(), `INSERT INTO repositories(id,name,provider,provider_project_id,scm_base_url,default_branch,default_branch_source,owner,scm_check_status,scm_checked_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now())`, id, in.Name, in.Provider, in.ProviderProjectID, in.SCMBaseURL, in.DefaultBranch, in.BranchMode, in.Owner, check.Status)
 	if err != nil {
 		fail(w, 400, "repository already enrolled or invalid")
 		return
@@ -751,6 +761,10 @@ func (s *Server) scanToken(w http.ResponseWriter, r *http.Request) {
 	repo := r.PathValue("id")
 	if !s.repoAllowed(r.Context(), who(r), repo) {
 		fail(w, 403, "repository denied")
+		return
+	}
+	if _, err := s.scanConfigFor(repo); err != nil {
+		fail(w, 404, "active repository not found")
 		return
 	}
 	var in struct {

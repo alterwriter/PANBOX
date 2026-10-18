@@ -10,4 +10,4 @@ This public documentation describes the current alpha implementation and its lim
 | Build an integration against supported endpoints | [OpenAPI contract](../api/openapi.yaml) |
 | Review supported release assets and current limits | [Release notes](release-notes.md) |
 
-The native agent source is under [`cmd/panbox`](../cmd/panbox) and [`internal/scanner`](../internal/scanner). The server source is under [`cmd/panbox-server`](../cmd/panbox-server) and [`internal/server`](../internal/server). Keep scan keys in a secret manager and use a protected runner for CI.
+The native agent source is under [`cmd/panbox`](../cmd/panbox) and [`internal/scanner`](../internal/scanner). The server source is under [`cmd/panbox-server`](../cmd/panbox-server) and [`internal/server`](../internal/server). Keep API keys in a secret manager and use a protected runner for CI.

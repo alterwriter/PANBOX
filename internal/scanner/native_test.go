@@ -31,6 +31,33 @@ func TestVaccinNativeRules(t *testing.T) {
 	}
 }
 
+func TestVaccinRepositoryCustomRules(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".panbox"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	config := `{"rules":[{"id":"custom.team.unsafe-call","severity":"medium","message":"Unsafe call needs review","pattern":"unsafeCall\\(","extensions":[".js"]}]}`
+	if err := os.WriteFile(filepath.Join(root, ".panbox", "rules.json"), []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "app.js"), []byte("// unsafeCall(x)\nunsafeCall(input)\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Vaccin(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].RuleID != "custom.team.unsafe-call" || got[0].Line != 2 {
+		t.Fatalf("custom rules mismatch: %+v", got)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".panbox", "rules.json"), []byte(`{"rules":[{"id":"custom.bad","severity":"high","message":"bad","pattern":"(","extensions":[".js"]}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Vaccin(root); err == nil {
+		t.Fatal("invalid rule must fail scan rather than silently pass")
+	}
+}
+
 func TestEnetronQueriesPinnedDependencies(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "requirements.txt"), []byte("demo-pkg==1.0.0\n"), 0600); err != nil {

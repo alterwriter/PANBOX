@@ -63,6 +63,72 @@ type rule struct {
 	re                    *regexp.Regexp
 }
 
+// Custom VACCIN rules are versioned with the repository and run on the CI checkout.
+type customRule struct {
+	ID         string   `json:"id"`
+	Severity   string   `json:"severity"`
+	Message    string   `json:"message"`
+	Pattern    string   `json:"pattern"`
+	Extensions []string `json:"extensions"`
+}
+
+func loadCustomRules(root string) (map[string][]rule, error) {
+	path := filepath.Join(root, ".panbox", "rules.json")
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string][]rule{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > 64<<10 {
+		return nil, errors.New("custom rule file exceeds 64 KiB")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var config struct {
+		Rules []customRule `json:"rules"`
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&config); err != nil {
+		return nil, fmt.Errorf("invalid custom rules: %w", err)
+	}
+	var trailing any
+	if err := d.Decode(&trailing); err != io.EOF {
+		return nil, errors.New("unexpected content after custom rules")
+	}
+	if len(config.Rules) > 64 {
+		return nil, errors.New("maximum 64 custom rules")
+	}
+	allowed := map[string]bool{".py": true, ".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".go": true}
+	out := map[string][]rule{}
+	seen := map[string]bool{}
+	for _, spec := range config.Rules {
+		if !regexp.MustCompile(`^custom\.[a-z0-9][a-z0-9._-]{0,63}$`).MatchString(spec.ID) || seen[spec.ID] || !validSeverity(spec.Severity) || len(spec.Message) == 0 || len(spec.Message) > 200 || len(spec.Pattern) == 0 || len(spec.Pattern) > 256 || len(spec.Extensions) == 0 || len(spec.Extensions) > 6 {
+			return nil, fmt.Errorf("invalid custom rule: %s", spec.ID)
+		}
+		seen[spec.ID] = true
+		compiled, err := regexp.Compile(spec.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("rule %s: %w", spec.ID, err)
+		}
+		for _, ext := range spec.Extensions {
+			if !allowed[ext] {
+				return nil, fmt.Errorf("rule %s: unsupported extension %s", spec.ID, ext)
+			}
+			out[ext] = append(out[ext], rule{spec.ID, spec.Severity, spec.Message, compiled})
+		}
+	}
+	return out, nil
+}
+
+func validSeverity(v string) bool {
+	return v == "critical" || v == "high" || v == "medium" || v == "low" || v == "info"
+}
+
 var codeRules = map[string][]rule{
 	".py": {
 		{"panbox.python.flask-debug", "high", "Flask debug mode is enabled", regexp.MustCompile(`\b(?:app|application)\.run\s*\([^\n]*\bdebug\s*=\s*True\b`)},
@@ -76,6 +142,10 @@ var codeRules = map[string][]rule{
 }
 
 func Vaccin(root string) ([]Finding, error) {
+	custom, err := loadCustomRules(root)
+	if err != nil {
+		return nil, err
+	}
 	paths, err := files(root, func(name string) bool { _, ok := codeRules[filepath.Ext(name)]; return ok })
 	if err != nil {
 		return nil, err
@@ -101,7 +171,7 @@ func Vaccin(root string) ([]Finding, error) {
 			if filepath.Ext(path) == ".go" && !strings.HasPrefix(strings.TrimSpace(s.Text()), "//") {
 				code = strings.SplitN(s.Text(), "//", 2)[0]
 			}
-			for _, r := range codeRules[filepath.Ext(path)] {
+			for _, r := range append(codeRules[filepath.Ext(path)], custom[filepath.Ext(path)]...) {
 				if r.re.MatchString(code) {
 					out = append(out, Finding{Module: "vaccin", RuleID: r.id, Severity: r.severity, Path: p, Line: line, Message: r.message, Identity: fmt.Sprintf("%s:%s:%d", r.id, p, line)})
 				}

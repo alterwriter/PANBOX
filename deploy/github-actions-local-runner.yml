@@ -1,10 +1,9 @@
 # Copy into .github/workflows/panbox.yml in a repository being scanned.
 # Use an isolated, protected Linux self-hosted runner on the PANBOX LAN.
-# Repository variable: PANBOX_REPOSITORY_ID. Secret: PANBOX_TOKEN.
+# Repository variables: PANBOX_REPOSITORY_ID, PANBOX_SERVER. Secret: PANBOX_API_KEY.
 name: PANBOX scan
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 jobs:
   scan:
@@ -18,16 +17,20 @@ jobs:
       - name: Check runner checkout and PANBOX route
         run: |
           git rev-parse --is-inside-work-tree
-          curl -fsS http://127.0.0.1:8080/readyz
+          curl -fsS "$PANBOX_SERVER/readyz"
+        env:
+          PANBOX_SERVER: ${{ vars.PANBOX_SERVER }}
       - name: Install agent only from pinned PANBOX release
         env:
-          PANBOX_VERSION: v0.1.0-alpha.5
+          PANBOX_VERSION: v0.1.0-alpha.6
         run: |
           curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o "$RUNNER_TEMP/install-panbox-agent.sh"
           sh "$RUNNER_TEMP/install-panbox-agent.sh" "$PANBOX_VERSION" "$RUNNER_TEMP/panbox-bin"
       - name: Run PANBOX
         env:
-          PANBOX_TOKEN: ${{ secrets.PANBOX_TOKEN }}
+          PANBOX_API_KEY: ${{ secrets.PANBOX_API_KEY }}
+          PANBOX_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PANBOX_REPOSITORY_ID: ${{ vars.PANBOX_REPOSITORY_ID }}
+          PANBOX_SERVER: ${{ vars.PANBOX_SERVER }}
         run: |
-          "$RUNNER_TEMP/panbox-bin/panbox" go --server http://127.0.0.1:8080 --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
+          "$RUNNER_TEMP/panbox-bin/panbox" go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"

@@ -37,9 +37,10 @@ type scanInput struct {
 	Scope         string `json:"scope"`
 	RepositoryID  string `json:"repository_id"`
 	Git           struct {
-		Branch    string `json:"branch"`
-		CommitSHA string `json:"commit_sha"`
-		BaseSHA   string `json:"base_sha"`
+		Branch        string `json:"branch"`
+		DefaultBranch string `json:"default_branch"`
+		CommitSHA     string `json:"commit_sha"`
+		BaseSHA       string `json:"base_sha"`
 	} `json:"git"`
 	Modules  []moduleInput  `json:"modules"`
 	Findings []findingInput `json:"findings"`
@@ -48,6 +49,9 @@ type scanInput struct {
 func validScan(in scanInput) error {
 	if in.SchemaVersion != "1.0" || in.ClientScanID == "" || in.Scope != "repo" || in.RepositoryID == "" || in.Git.Branch == "" || in.Git.CommitSHA == "" {
 		return errors.New("invalid scan identity or schema version")
+	}
+	if !validBranch(in.Git.Branch) || (in.Git.DefaultBranch != "" && !validBranch(in.Git.DefaultBranch)) {
+		return errors.New("invalid Git branch")
 	}
 	if len(in.Modules) == 0 || len(in.Modules) > 2 || len(in.Findings) > 10000 {
 		return errors.New("invalid module or finding count")
@@ -100,8 +104,8 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := who(r)
-	if p.Session || p.Kind != "scan" {
-		fail(w, 403, "scan upload requires repository-scoped scan token")
+	if p.Session || (p.Kind != "scan" && p.Kind != "api") {
+		fail(w, 403, "scan upload requires an API key with scans:write")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
@@ -122,7 +126,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.repoAllowed(r.Context(), p, in.RepositoryID) {
-		fail(w, 403, "token is not scoped to repository")
+		fail(w, 403, "repository denied: check PANBOX project ID, API key repository scope, and key owner's repository access")
 		return
 	}
 	var existing string
@@ -158,6 +162,12 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	if in.Git.DefaultBranch != "" {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE repositories SET default_branch=$2,default_branch_source='ci' WHERE id=$1 AND default_branch_source IN ('ci_pending','ci') AND archived_at IS NULL`, in.RepositoryID, in.Git.DefaultBranch); err != nil {
+			fail(w, 500, "default branch update failed")
+			return
+		}
+	}
 	id := core.ID()
 	var passed any = nil
 	if status == "complete" {
@@ -187,8 +197,8 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "finding save failed")
 			return
 		}
-		var override sql.NullString
-		if err = tx.QueryRowContext(r.Context(), `SELECT recast_severity FROM findings WHERE id=$1`, fid).Scan(&override); err != nil {
+		var override, disposition sql.NullString
+		if err = tx.QueryRowContext(r.Context(), `SELECT f.recast_severity,d.status FROM findings f LEFT JOIN finding_dispositions d ON d.finding_id=f.id WHERE f.id=$1`, fid).Scan(&override, &disposition); err != nil {
 			fail(w, 500, "recast lookup failed")
 			return
 		}
@@ -212,7 +222,9 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "occurrence save failed")
 			return
 		}
-		severities = append(severities, effective)
+		if !disposition.Valid || disposition.String == "open" {
+			severities = append(severities, effective)
+		}
 	}
 	gate, gateErr := core.GateAt(status, severities, cfg.GateSeverity)
 	var gateValue any = nil
@@ -305,11 +317,12 @@ func (s *Server) scans(w http.ResponseWriter, r *http.Request) {
 
 type findingRow struct {
 	ID, RepositoryID, Repository, Branch, Module, RuleID, Path, Message, Raw, Effective, Baseline, ScanID string
+	Status, SourceURL, ReferenceURL, Remediation                                                          string
 	Line                                                                                                  int
 	At                                                                                                    time.Time
 }
 
-func (s *Server) findingRows(r *http.Request) ([]findingRow, error) {
+func (s *Server) findingRows(r *http.Request, activeOnly bool) ([]findingRow, error) {
 	q := r.URL.Query()
 	repo := q.Get("repository_id")
 	branch := q.Get("branch")
@@ -318,7 +331,23 @@ func (s *Server) findingRows(r *http.Request) ([]findingRow, error) {
 	if repo != "" && !s.repoAllowed(r.Context(), who(r), repo) {
 		return nil, errors.New("repository denied")
 	}
-	rows, err := s.DB.QueryContext(r.Context(), `WITH latest AS (SELECT DISTINCT ON(repository_id,branch) id FROM scans WHERE status='complete' ORDER BY repository_id,branch,created_at DESC,id DESC) SELECT f.id,f.repository_id,r.name,s.branch,f.module,f.rule_id,f.path,f.message,o.raw_severity,o.effective_severity,o.baseline_status,o.line,s.id,s.created_at FROM latest l JOIN scans s ON s.id=l.id JOIN occurrences o ON o.scan_id=s.id JOIN findings f ON f.id=o.finding_id JOIN repositories r ON r.id=f.repository_id WHERE ($1='' OR f.repository_id=$1) AND ($2='' OR s.branch=$2) AND ($3='' OR f.module=$3) AND ($4='' OR o.effective_severity=$4) ORDER BY s.created_at DESC LIMIT 1000`, repo, branch, module, severity)
+	rows, err := s.DB.QueryContext(r.Context(), `WITH latest AS (
+    SELECT DISTINCT ON(s.repository_id,s.branch,m.value->>'name') s.id,s.repository_id,s.branch,m.value->>'name' AS module
+    FROM scans s CROSS JOIN LATERAL jsonb_array_elements(s.module_status) m
+    WHERE s.status='complete' ORDER BY s.repository_id,s.branch,m.value->>'name',s.created_at DESC,s.id DESC
+  ), seen AS (
+    SELECT DISTINCT ON(f.id,s.branch) f.id,f.repository_id,r.name,s.branch,f.module,f.rule_id,f.path,f.message,o.raw_severity,o.effective_severity,o.baseline_status,o.line,s.id AS scan_id,s.created_at,s.commit_sha,r.provider,r.provider_project_id,r.scm_base_url
+    FROM occurrences o JOIN scans s ON s.id=o.scan_id JOIN findings f ON f.id=o.finding_id JOIN repositories r ON r.id=f.repository_id
+    WHERE s.status='complete' AND r.archived_at IS NULL ORDER BY f.id,s.branch,s.created_at DESC,s.id DESC
+  )
+  SELECT x.id,x.repository_id,x.name,x.branch,x.module,x.rule_id,x.path,x.message,x.raw_severity,x.effective_severity,x.baseline_status,x.line,x.scan_id,x.created_at,
+    CASE WHEN x.scan_id<>l.id THEN 'resolved' ELSE COALESCE(d.status,'open') END AS lifecycle,
+    x.commit_sha,x.provider,x.provider_project_id,x.scm_base_url
+  FROM seen x JOIN latest l ON l.repository_id=x.repository_id AND l.branch=x.branch AND l.module=x.module
+  LEFT JOIN finding_dispositions d ON d.finding_id=x.id
+  WHERE ($1='' OR x.repository_id=$1) AND ($2='' OR x.branch=$2) AND ($3='' OR x.module=$3) AND ($4='' OR x.effective_severity=$4)
+    AND (NOT $5 OR x.scan_id=l.id)
+  ORDER BY x.created_at DESC LIMIT 1000`, repo, branch, module, severity, activeOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -326,11 +355,14 @@ func (s *Server) findingRows(r *http.Request) ([]findingRow, error) {
 	out := []findingRow{}
 	for rows.Next() {
 		var x findingRow
-		err = rows.Scan(&x.ID, &x.RepositoryID, &x.Repository, &x.Branch, &x.Module, &x.RuleID, &x.Path, &x.Message, &x.Raw, &x.Effective, &x.Baseline, &x.Line, &x.ScanID, &x.At)
+		var commit, provider, project, baseURL string
+		err = rows.Scan(&x.ID, &x.RepositoryID, &x.Repository, &x.Branch, &x.Module, &x.RuleID, &x.Path, &x.Message, &x.Raw, &x.Effective, &x.Baseline, &x.Line, &x.ScanID, &x.At, &x.Status, &commit, &provider, &project, &baseURL)
 		if err != nil {
 			return nil, err
 		}
 		if s.repoAllowed(r.Context(), who(r), x.RepositoryID) {
+			x.SourceURL = findingSourceURL(provider, project, baseURL, commit, x.Path, x.Line)
+			x.ReferenceURL, x.Remediation = findingGuidance(x.Module, x.RuleID)
 			out = append(out, x)
 		}
 	}
@@ -340,7 +372,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 	if !require(w, r, "findings:read") {
 		return
 	}
-	rows, err := s.findingRows(r)
+	rows, err := s.findingRows(r, false)
 	if err != nil {
 		fail(w, 403, err.Error())
 		return
@@ -353,7 +385,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repoFilter := r.URL.Query().Get("repository_id")
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT r.id,r.name,r.default_branch,ls.id,ls.status,ls.created_at,ok.id,ok.created_at FROM repositories r LEFT JOIN LATERAL (SELECT id,status,created_at FROM scans WHERE repository_id=r.id AND branch=r.default_branch ORDER BY created_at DESC LIMIT 1) ls ON true LEFT JOIN LATERAL (SELECT id,created_at FROM scans WHERE repository_id=r.id AND branch=r.default_branch AND status='complete' ORDER BY created_at DESC LIMIT 1) ok ON true ORDER BY r.name`)
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT r.id,r.name,r.default_branch,ls.id,ls.status,ls.created_at,ok.id,ok.created_at FROM repositories r LEFT JOIN LATERAL (SELECT id,status,created_at FROM scans WHERE repository_id=r.id AND branch=r.default_branch ORDER BY created_at DESC LIMIT 1) ls ON true LEFT JOIN LATERAL (SELECT id,created_at FROM scans WHERE repository_id=r.id AND branch=r.default_branch AND status='complete' ORDER BY created_at DESC LIMIT 1) ok ON true WHERE r.archived_at IS NULL ORDER BY r.name`)
 	if err != nil {
 		fail(w, 500, "database error")
 		return
@@ -395,7 +427,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		if successfulID.Valid {
 			item.LastSuccessful = successfulAt.Time
-			fr, _ := s.DB.QueryContext(r.Context(), `SELECT effective_severity,count(*) FROM occurrences WHERE scan_id=$1 GROUP BY effective_severity`, successfulID.String)
+			fr, _ := s.DB.QueryContext(r.Context(), `SELECT o.effective_severity,count(*) FROM occurrences o LEFT JOIN finding_dispositions d ON d.finding_id=o.finding_id WHERE o.scan_id=$1 AND COALESCE(d.status,'open')='open' GROUP BY o.effective_severity`, successfulID.String)
 			if fr != nil {
 				for fr.Next() {
 					var severity string
@@ -433,7 +465,7 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 	if !require(w, r, "reports:export") {
 		return
 	}
-	rows, err := s.findingRows(r)
+	rows, err := s.findingRows(r, true)
 	if err != nil {
 		fail(w, 403, err.Error())
 		return

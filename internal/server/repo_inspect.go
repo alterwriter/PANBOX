@@ -55,12 +55,34 @@ func allowedCustomHost(host string) bool {
 	return false
 }
 
-func inspectionURL(provider, project string) (string, string, error) {
+func customSCMBase(raw string) (string, error) {
+	raw = strings.TrimSuffix(strings.TrimSpace(raw), "/")
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || u.Hostname() == "" || !allowedCustomHost(u.Host) {
+		return "", errors.New("self-hosted SCM requires an HTTPS origin whose exact host is in PANBOX_SCM_ALLOWED_HOSTS")
+	}
+	return "https://" + u.Host, nil
+}
+
+func inspectionURL(provider, project, baseURL string) (string, string, error) {
+	if baseURL != "" && provider != "github" && provider != "gitlab" && provider != "gitea" && provider != "generic" {
+		return "", "", errors.New("self-hosted URL is supported for GitHub, GitLab, Gitea, or Other Git")
+	}
+	if baseURL != "" {
+		var err error
+		baseURL, err = customSCMBase(baseURL)
+		if err != nil {
+			return "", "", err
+		}
+	}
 	switch provider {
 	case "github", "bitbucket":
 		parts, err := pathParts(project, 2, 2)
 		if err != nil {
 			return "", "", err
+		}
+		if provider == "github" && baseURL != "" {
+			return baseURL + "/api/v3/repos/" + escaped(parts...), parts[0], nil
 		}
 		if provider == "github" {
 			return "https://api.github.com/repos/" + escaped(parts...), parts[0], nil
@@ -71,7 +93,10 @@ func inspectionURL(provider, project string) (string, string, error) {
 		if err != nil {
 			return "", "", err
 		}
-		return "https://gitlab.com/api/v4/projects/" + url.PathEscape(strings.Join(parts, "/")), strings.Join(parts[:len(parts)-1], "/"), nil
+		if baseURL == "" {
+			baseURL = "https://gitlab.com"
+		}
+		return baseURL + "/api/v4/projects/" + url.PathEscape(strings.Join(parts, "/")), strings.Join(parts[:len(parts)-1], "/"), nil
 	case "azure":
 		parts, err := pathParts(project, 3, 3)
 		if err != nil {
@@ -79,11 +104,18 @@ func inspectionURL(provider, project string) (string, string, error) {
 		}
 		return "https://dev.azure.com/" + escaped(parts[0], parts[1]) + "/_apis/git/repositories/" + url.PathEscape(parts[2]) + "?api-version=7.1", parts[0], nil
 	case "gitea", "generic":
-		u, err := url.Parse(project)
-		if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Hostname() == "" || !allowedCustomHost(u.Host) {
-			return "", "", errors.New("self-managed SCM needs a full HTTPS URL and its host in PANBOX_SCM_ALLOWED_HOSTS")
+		if baseURL == "" {
+			u, err := url.Parse(project)
+			if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Hostname() == "" {
+				return "", "", errors.New("enter an HTTPS repository URL or choose a self-hosted SCM origin")
+			}
+			baseURL, err = customSCMBase("https://" + u.Host)
+			if err != nil {
+				return "", "", err
+			}
+			project = strings.Trim(u.Path, "/")
 		}
-		rawPath := strings.Trim(u.Path, "/")
+		rawPath := strings.Trim(project, "/")
 		parts, err := pathParts(strings.TrimSuffix(rawPath, ".git"), 2, 20)
 		if err != nil {
 			return "", "", err
@@ -92,24 +124,24 @@ func inspectionURL(provider, project string) (string, string, error) {
 			if len(parts) != 2 {
 				return "", "", errors.New("Gitea URL must end in /owner/repository")
 			}
-			return "https://" + u.Host + "/api/v1/repos/" + escaped(parts...), parts[0], nil
+			return baseURL + "/api/v1/repos/" + escaped(parts...), parts[0], nil
 		}
 		if strings.HasSuffix(rawPath, ".git") {
 			parts[len(parts)-1] += ".git"
 		}
-		return "https://" + u.Host + "/" + escaped(parts...) + "/info/refs?service=git-upload-pack", "", nil
+		return baseURL + "/" + escaped(parts...) + "/info/refs?service=git-upload-pack", "", nil
 	default:
 		return "", "", errors.New("unsupported SCM provider")
 	}
 }
 
-func inspectSCM(ctx context.Context, provider, project string) (scmInspection, error) {
+func inspectSCM(ctx context.Context, provider, project, baseURL string) (scmInspection, error) {
 	client := &http.Client{Timeout: 6 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return inspectSCMWithClient(ctx, provider, project, client)
+	return inspectSCMWithClient(ctx, provider, project, baseURL, client)
 }
 
-func inspectSCMWithClient(ctx context.Context, provider, project string, client *http.Client) (scmInspection, error) {
-	endpoint, owner, err := inspectionURL(provider, project)
+func inspectSCMWithClient(ctx context.Context, provider, project, baseURL string, client *http.Client) (scmInspection, error) {
+	endpoint, owner, err := inspectionURL(provider, project, baseURL)
 	if err != nil {
 		return scmInspection{Status: "manual_required", Message: err.Error()}, nil
 	}
@@ -131,7 +163,7 @@ func inspectSCMWithClient(ctx context.Context, provider, project string, client 
 		if !strings.Contains(resp.Header.Get("Content-Type"), "git-upload-pack-advertisement") {
 			return scmInspection{Status: "manual_required", Message: "SCM responded, but its Git smart-HTTP endpoint was not confirmed"}, nil
 		}
-		return scmInspection{Status: "reachable_no_branch", Message: "Git endpoint is reachable from PANBOX; enter its default branch manually and verify runner access"}, nil
+		return scmInspection{Status: "reachable_no_branch", Message: "Git endpoint is reachable; CI can report its default branch on the first upload"}, nil
 	}
 	var meta struct {
 		DefaultBranch string `json:"default_branch"`
@@ -153,7 +185,7 @@ func inspectSCMWithClient(ctx context.Context, provider, project string, client 
 	if provider == "azure" {
 		branch = strings.TrimPrefix(meta.AzureBranch, "refs/heads/")
 	}
-	if branch == "" || strings.ContainsAny(branch, "\r\n") || len(branch) > 240 {
+	if !validBranch(branch) {
 		return scmInspection{Status: "manual_required", Message: "SCM did not return a usable default branch"}, nil
 	}
 	if meta.Owner.Login != "" {
@@ -169,11 +201,12 @@ func (s *Server) inspectRepo(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Provider          string `json:"provider"`
 		ProviderProjectID string `json:"provider_project_id"`
+		SCMBaseURL        string `json:"scm_base_url"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	result, err := inspectSCM(r.Context(), strings.ToLower(strings.TrimSpace(in.Provider)), strings.TrimSpace(in.ProviderProjectID))
+	result, err := inspectSCM(r.Context(), strings.ToLower(strings.TrimSpace(in.Provider)), strings.TrimSpace(in.ProviderProjectID), strings.TrimSpace(in.SCMBaseURL))
 	if err != nil {
 		fail(w, 500, "SCM inspection failed")
 		return
@@ -190,18 +223,18 @@ func (s *Server) recheckRepoSCM(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "repository denied")
 		return
 	}
-	var provider, project string
-	if err := s.DB.QueryRowContext(r.Context(), `SELECT provider,provider_project_id FROM repositories WHERE id=$1`, id).Scan(&provider, &project); err != nil {
+	var provider, project, baseURL string
+	if err := s.DB.QueryRowContext(r.Context(), `SELECT provider,provider_project_id,scm_base_url FROM repositories WHERE id=$1 AND archived_at IS NULL`, id).Scan(&provider, &project, &baseURL); err != nil {
 		fail(w, 404, "repository not found")
 		return
 	}
-	result, err := inspectSCM(r.Context(), provider, project)
+	result, err := inspectSCM(r.Context(), provider, project, baseURL)
 	if err != nil {
 		fail(w, 500, "SCM inspection failed")
 		return
 	}
 	if result.Status == "verified" {
-		_, err = s.DB.ExecContext(r.Context(), `UPDATE repositories SET default_branch=$2,owner=CASE WHEN owner='' THEN $3 ELSE owner END,scm_check_status=$4,scm_checked_at=now() WHERE id=$1`, id, result.DefaultBranch, result.Owner, result.Status)
+		_, err = s.DB.ExecContext(r.Context(), `UPDATE repositories SET default_branch=CASE WHEN default_branch_source<>'manual' THEN $2 ELSE default_branch END,default_branch_source=CASE WHEN default_branch_source<>'manual' THEN 'auto' ELSE 'manual' END,owner=CASE WHEN owner='' THEN $3 ELSE owner END,scm_check_status=$4,scm_checked_at=now() WHERE id=$1`, id, result.DefaultBranch, result.Owner, result.Status)
 	} else {
 		_, err = s.DB.ExecContext(r.Context(), `UPDATE repositories SET scm_check_status=$2,scm_checked_at=now() WHERE id=$1`, id, result.Status)
 	}
