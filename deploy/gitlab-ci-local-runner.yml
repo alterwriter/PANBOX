@@ -1,12 +1,13 @@
-# Copy this job into .gitlab-ci.yml. Use a protected shell runner in an
-# isolated Linux VM on the PANBOX LAN. The job downloads only the agent.
-# Set PANBOX_SERVER and PANBOX_REPOSITORY_ID as CI variables. Keep PANBOX_API_KEY
-# masked and protected. Protect runner and branches.
+# Copy this job into .gitlab-ci.yml. It runs on a hosted Linux runner and
+# downloads only the PANBOX agent. The dashboard must be reachable over HTTPS.
+# Keep PANBOX_API_KEY masked and protected; protect every branch that can scan.
 panbox_scan:
   stage: test
-  tags: [panbox-local]
+  image: alpine:3.22
   variables:
     PANBOX_VERSION: v0.1.0-alpha.6
+  before_script:
+    - apk add --no-cache curl ca-certificates git
   script:
     - git rev-parse --is-inside-work-tree
     - curl -fsS "$PANBOX_SERVER/readyz"

@@ -50,7 +50,37 @@ Invoke-RestMethod http://127.0.0.1:8080/readyz
 
 **Hasil yang diharapkan:** dashboard dan API sama seperti bagian 3. Jalankan `./scripts/seed-demo.ps1` hanya untuk data demo opsional. Saat membuat `.env` baru, pakai satu initializer saja.
 
+### Variabel server dan upgrade dashboard
+
+| Variabel `.env` server | Wajib | Fungsi |
+|---|---:|---|
+| `PANBOX_DB_PASSWORD` | Ya | Password PostgreSQL; gunakan nilai acak kuat. |
+| `PANBOX_BOOTSTRAP_EMAIL` / `PANBOX_BOOTSTRAP_PASSWORD` | Ya | Akun admin awal; password hanya dipakai saat database pertama dibuat. |
+| `PANBOX_SECURE_COOKIE` | Produksi | Set `true` jika dashboard diakses lewat HTTPS. |
+| `PANBOX_HOST_PORT` / `PANBOX_DB_HOST_PORT` | Tidak | Port host; default `8080` / `5434`, tetap bind ke loopback. |
+| `PANBOX_SCM_ALLOWED_HOSTS` | Opsional | Host HTTPS self-hosted SCM yang diizinkan, dipisahkan koma. |
+
+**Upgrade di server Debian/Linux:** simpan backup dan commit aktif, lalu build ulang dari `main`. Jalankan dari direktori clone PANBOX:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml exec -T db pg_dump -U panbox panbox > "panbox-db-$(date -u +%Y%m%dT%H%M%SZ).sql"
+git rev-parse HEAD > .panbox-previous-version
+git pull --ff-only origin main
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+curl -fsS http://127.0.0.1:8080/readyz
+```
+
+Migrasi skema berjalan saat server baru start. Simpan backup sebelum upgrade; untuk rollback yang melibatkan migrasi, pulihkan database backup bersama versi kode sebelumnya. Jangan menjalankan `docker compose down -v` saat upgrade.
+
 ## 5. Tambahkan hanya agent ke CI
+
+| Variabel CI | Disimpan sebagai | Fungsi |
+|---|---|---|
+| `PANBOX_SERVER` | Variable | URL dashboard yang bisa dijangkau runner, idealnya HTTPS. |
+| `PANBOX_REPOSITORY_ID` | Variable | ID internal PANBOX dari halaman repository; bukan project ID SCM. |
+| `PANBOX_API_KEY` | Masked/protected secret | API key PANBOX berscope `scans:write`; tidak perlu token repository. |
+| `PANBOX_VERSION` | Variable | Tag agent yang dipin, misalnya `v0.1.0-alpha.6`. |
+| `PANBOX_DEFAULT_BRANCH` | Opsional | Isi jika CI tidak menyediakan metadata default branch. |
 
 **Model onboarding:** Daftarkan proyek PANBOX sebelum scan pertama. Project ID adalah penanda tujuan, bukan secret. Satu API key dengan `scans:write` dipakai untuk mengambil policy dan mengunggah hasil. Repo SCM privat tidak perlu dijadikan publik: kredensial checkout bawaan CI mengambil source, sementara PANBOX hanya menerima hasil ternormalisasi.
 
@@ -79,7 +109,7 @@ curl -fsS -H "Authorization: Bearer $PANBOX_API_KEY" \
 {"rules":[{"id":"custom.team.unsafe-call","severity":"medium","message":"Unsafe call needs review","pattern":"unsafeCall\\(","extensions":[".js"]}]}
 ```
 
-Pola JSON di atas mewakili regex `unsafeCall\(`. ID dimulai `custom.`; ekstensi yang didukung `.py`, `.js`, `.jsx`, `.ts`, `.tsx`, dan `.go`. Batas: 64 rule, 256 karakter per pola, file 64 KiB. Rule memeriksa satu baris setelah penyaringan komentar/string sederhana; belum melakukan taint analysis. Review file rule seperti perubahan kode lain dan uji pada repo yang representatif.
+Pola JSON di atas mewakili regex `unsafeCall\(`. ID dimulai `custom.`; ekstensi yang didukung `.py`, `.pyw`, `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs`, `.mts`, `.cts`, `.go`, `.java`, `.jsp`, `.php`, dan `.phtml`. Batas: 64 rule, 256 karakter per pola, file 64 KiB. Regex dapat lintas baris setelah penyaringan komentar/string secara leksikal; ini bukan analisis AST atau taint. Review file rule seperti perubahan kode lain dan uji di repo representatif. Lihat [matriks coverage deteksi alpha](detection-coverage.md) untuk keluarga rule bawaan dan batas manifest SCA.
 
 **Setiap job Linux/macOS:** ambil installer versi tetap dari [release PANBOX v0.1.0-alpha.6](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.6). Installer memilih OS/CPU, mengunduh hanya binary agent, memeriksa [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.6/SHA256SUMS), lalu memasang di workspace job tanpa sudo:
 
@@ -92,7 +122,7 @@ sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 
 **Hasil yang diharapkan:** exit `0` scan lengkap/pass; `1` gate gagal; `2` scan/transport/konfigurasi tidak lengkap; `3` autentikasi atau izin ditolak. Salin contoh [GitHub Actions](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/github-actions-local-runner.yml) atau [GitLab CI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.6/deploy/gitlab-ci-local-runner.yml). Untuk runner Windows, unduh [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.6/install-agent.ps1), lalu jalankan `./install-agent.ps1 -Version v0.1.0-alpha.6`; hasilnya `./.panbox/bin/panbox.exe` setelah verifikasi checksum. [Binary agent langsung](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.6) juga tersedia.
 
-VACCIN memeriksa beberapa pola source Python, JavaScript/TypeScript, dan Go. ENETRON mencocokkan dependensi berversi tetap dari npm lockfile v2/v3, `requirements.txt`, dan `go.mod` dengan data advisory OSV. OSV adalah sumber data, bukan engine scanner. `PANBOX_ADVISORY_URL` atau `--advisory-url` memilih mirror kompatibel OSV. `--offline` meniadakan upload ke dashboard, tetapi ENETRON tetap menghubungi API advisory kecuali hanya `--modules vaccin` yang dipilih.
+VACCIN menyediakan rule leksikal buatan PANBOX untuk lima keluarga bahasa; lihat [matriks coverage](detection-coverage.md) untuk keluarga pemeriksaan dan batasannya. ENETRON membaca lock npm v1/v2/v3, pnpm, Yarn, Bun JSON; requirements/Pipfile/Poetry/uv/PDM untuk Python; `go.mod`/`go.sum`; `pom.xml` Maven; `gradle.lockfile`; dan `composer.lock` PHP. Maven hanya membaca versi eksplisit atau dependencyManagement lokal, bukan property/BOM/parent inheritance. ENETRON mengirim koordinat dan versi paket ke data advisory OSV; OSV adalah sumber data, bukan engine scanner. Query dibatch dan dipaginasi. `PANBOX_ADVISORY_URL` atau `--advisory-url` memilih mirror kompatibel OSV. Tanpa manifest dependensi yang didukung, scan ENETRON tidak lengkap; nonaktifkan modul di Scan policy untuk repo tanpa dependensi, atau commit lockfile jika aplikasi memiliki dependensi.
 
 **Urutan CI ke dashboard:** (1) runner mengunduh agent versi tetap; (2) `panbox go` mengakses `GET /v1/repos/{id}/scan-config` dengan API key CI; (3) agent memindai modul aktif pada checkout; (4) mengirim satu bundle JSON ke `POST /v1/scans` dengan `Authorization: Bearer $PANBOX_API_KEY`; (5) API menyimpan snapshot dan mengembalikan keputusan gate; (6) agent keluar 0 (lulus), 1 (gate gagal), 2 (tidak lengkap/jaringan), atau 3 (autentikasi). Tidak ada setup upload terpisah. Cek policy dari runner: `curl -fsS -H "Authorization: Bearer $PANBOX_API_KEY" "$PANBOX_SERVER/v1/repos/$PANBOX_REPOSITORY_ID/scan-config"`.
 
@@ -149,6 +179,7 @@ Host Debian 2 GB adalah **target untuk divalidasi**, bukan jaminan. Fixture keci
 - **Unduhan agent gagal:** periksa tag release, nama asset OS/CPU, akses GitHub keluar, `curl`, dan alat SHA-256. Jangan lewati checksum.
 - **Runner gagal menjangkau PANBOX:** `127.0.0.1` di container menunjuk ke container itu; gunakan alamat host/jaringan privat atau SSH relay.
 - **Exit 2:** cek manifest, endpoint advisory, path kerja, endpoint PANBOX, dan log; tidak lengkap bukan pass.
+- **Error `no supported dependency manifest`:** repo privat tetap didukung; error ini berarti checkout berhasil, tetapi runner tidak menemukan lockfile yang dipahami ENETRON. Commit lockfile yang sesuai, misalnya `package-lock.json` untuk Node, atau nonaktifkan ENETRON pada policy untuk repo tanpa dependensi. Hasil `partial`/exit `2` menjaga gate berstatus belum terverifikasi.
 - **Exit 3:** cek expiry/revocation API key, `scans:write`, ID repo internal, role, dan membership.
 - **Impor artifact terlambat:** cek timer, `GITLAB_READ_TOKEN`, ref yang diizinkan, Jobs API/artifact, dan state relay.
 

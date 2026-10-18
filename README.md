@@ -2,7 +2,7 @@
 
 PANBOX is a lightweight, self-hosted AppSec dashboard and native scanning agent for Git repositories. The Go server serves a React UI and API; PostgreSQL is the only required stateful service. The agent runs on a developer machine or CI runner. It does not execute Semgrep, Grype, or another scanner.
 
-This is an **alpha preview**. VACCIN and ENETRON are first-party PANBOX implementations with deliberately narrow coverage. VACCIN checks selected Python, JavaScript/TypeScript, and Go source patterns. ENETRON reads pinned npm lockfiles (v2/v3), `requirements.txt`, and `go.mod`, then matches package versions to OSV advisories through the OSV API. OSV supplies advisory data, not a scanner executable. Missing manifests or advisory service failure mark the ENETRON module as error, so the gate is unverified. An advisory without usable severity is reported as `info`. The agent sends package names and versions to the configured advisory endpoint; use `PANBOX_ADVISORY_URL` for an approved OSV-compatible mirror.
+This is an **alpha preview**. VACCIN and ENETRON are first-party PANBOX implementations. VACCIN includes native lexical rules for Java, JavaScript/TypeScript, Python, PHP, and Go across injection, unsafe execution, XSS, SSRF, path traversal, deserialization, TLS/cookie controls, cryptography, and risky framework/API usage. ENETRON parses resolved or pinned dependencies from npm, pnpm, Yarn, Bun, Python, Go, Maven/Gradle, and Composer inputs, then matches package versions to OSV advisory data over HTTPS. OSV supplies advisory data, not a scanner executable. See the [detection coverage guide](docs/detection-coverage.md) for exact rule themes, manifest support, and limitations.
 
 RIDER (secrets), TESLA (IaC), AI, approval workflows, executive report templates, and broad language/dataflow coverage are not implemented. A read-only local MCP bridge is available. See the detailed [English guide](docs/product-guide-en.md) and [Indonesian guide](docs/product-guide-id.md).
 
@@ -44,7 +44,7 @@ Open `http://127.0.0.1:8080` or the configured `PANBOX_HOST_PORT`, then sign in 
 
 ## Agent binary and scanning
 
-**Pilot controls:** Repository rows open detail, edit, scan policy, archive/remove, and restore actions. Admin can remove a mistaken enrollment: unscanned repositories are deleted, while scanned repositories are archived and project-bound credentials revoked. The default branch comes from public SCM metadata or, for private SCM, authenticated CI metadata on the first upload; manual override is available. GitHub Enterprise and GitLab self-managed use an HTTPS origin allowlisted in `PANBOX_SCM_ALLOWED_HOSTS`. Findings retain branch history and become resolved when absent from the next complete scan of their module. Recast and triage actions require an audited reason and revise affected gates. VACCIN reads optional repository-local rules from `.panbox/rules.json`; see the [guides](docs/product-guide-en.md). Detection coverage remains narrow and no false-positive rate is established.
+**Pilot controls:** Repository rows open detail, edit, scan policy, archive/remove, and restore actions. Admin can remove a mistaken enrollment: unscanned repositories are deleted, while scanned repositories are archived and project-bound credentials revoked. The default branch comes from public SCM metadata or, for private SCM, authenticated CI metadata on the first upload; manual override is available. GitHub Enterprise and GitLab self-managed use an HTTPS origin allowlisted in `PANBOX_SCM_ALLOWED_HOSTS`. Findings retain branch history and become resolved when absent from the next complete scan of their module. Recast and triage actions require an audited reason and revise affected gates. VACCIN reads optional repository-local rules from `.panbox/rules.json`; see the [guides](docs/product-guide-en.md). VACCIN uses bounded lexical signatures, not AST/dataflow analysis; rule accuracy is not independently measured.
 
 The [GitHub Releases page](https://github.com/alterwriter/PANBOX/releases) provides **single agent binaries** for Linux, macOS, and Windows on amd64/arm64, plus checksum-verified installers. Archives remain for manual installs. The dashboard is distributed separately through Docker Compose. No host Node, Python, Semgrep, or Grype installation is needed for the agent.
 
@@ -87,17 +87,17 @@ The repository can be public while PANBOX has no public IP or domain. These tran
 
 | Path | Inbound to PANBOX host | Synchronous CI gate | Example |
 |---|---|---|---|
-| Protected self-hosted runner on the PANBOX LAN | None | Yes | `deploy/github-actions-local-runner.yml`, `deploy/gitlab-ci-local-runner.yml` |
+| Hosted SCM runner to a public HTTPS PANBOX endpoint | HTTPS 443 | Yes | `deploy/github-actions-local-runner.yml`, `deploy/gitlab-ci-local-runner.yml` |
 | Reverse SSH tunnel from PANBOX to a reachable relay, plus a forward tunnel from CI | None | Yes | `deploy/gitlab-ci-ssh-relay.yml` |
 | CI artifact fetched and imported by PANBOX host | None | No | `deploy/gitlab-ci-pull-artifact.yml` (GitLab API), or any SCM artifact download followed by `panbox go --bundle` |
 
-A local runner polls the SCM over outbound HTTPS and posts scan results to PANBOX on its private network. Protect the runner, branch, and API key; do not expose the key to untrusted pull request code. For an SSH relay, pin host keys and restrict both SSH identities. The relay must be publicly reachable, while PANBOX itself needs no inbound route. Artifact pull is asynchronous and cannot enforce a CI gate; the included automated pull implementation currently covers GitLab, while the bundle import works with artifacts from any SCM.
+The hosted-runner templates target a PANBOX API reachable over HTTPS. Protect the API key and never expose it to untrusted pull request code. If PANBOX stays private, use the SSH relay: pin host keys and restrict both SSH identities. The relay must be publicly reachable, while PANBOX itself needs no inbound route. Artifact pull is asynchronous and cannot enforce a CI gate; the included automated pull implementation currently covers GitLab, while bundle import works with artifacts from any SCM.
 
 ## Access control and resources
 
 `admin` is the highest immutable role. Admins can create custom roles with explicit permissions, assign users, and grant repository membership. API and read-only access keys can be scoped to permissions and a repository. Scan keys are write-only for one repository. Keys expire, are revocable, and are stored as hashes.
 
-The dashboard target is a 2 GB Debian host, but this remains an unverified sizing target. The dashboard does not run scan jobs. Agent source checks have bounded file sizes; ENETRON limits a scan to 500 pinned dependencies and calls an advisory API. Measure memory/CPU on the intended host with representative repositories before making a performance claim.
+The dashboard target is a 2 GB Debian host, but this remains an unverified sizing target. The dashboard does not run scan jobs. Agent source checks skip source files above 2 MiB; ENETRON processes up to 20,000 pinned dependencies per scan in batches, follows OSV pagination, and fetches advisory details. Measure memory/CPU and request volume on representative repositories before making a performance claim.
 
 ## Verify
 
