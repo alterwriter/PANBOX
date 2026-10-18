@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,6 +57,14 @@ type bundle struct {
 	Findings []finding `json:"findings"`
 }
 
+type uploadResult struct {
+	ID, Status      string
+	GatePass        *bool  `json:"gate_pass"`
+	New             int    `json:"new"`
+	BaselineUnknown int    `json:"baseline_unknown"`
+	DashboardURL    string `json:"dashboard_url"`
+}
+
 type scanConfig struct {
 	Enabled      bool   `json:"enabled"`
 	Vaccin       bool   `json:"vaccin"`
@@ -89,6 +98,100 @@ func fetchScanConfig(base, repo, token string) (scanConfig, error) {
 }
 
 func main() { os.Exit(run(os.Args[1:])) }
+
+func safeLog(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, value)
+	runes := []rune(value)
+	if len(runes) > 500 {
+		return string(runes[:500]) + "…"
+	}
+	return value
+}
+
+func ciSourceURL(b bundle, f finding) string {
+	path, commit := f.Location.Path, b.Git.CommitSHA
+	if path == "" || strings.Contains(path, "\\") || strings.HasPrefix(path, "/") || len(commit) < 7 || len(commit) > 64 {
+		return ""
+	}
+	for _, c := range commit {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+			return ""
+		}
+	}
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return ""
+		}
+		parts[i] = url.PathEscape(part)
+	}
+	base := strings.TrimSuffix(os.Getenv("CI_PROJECT_URL"), "/")
+	if base == "" && os.Getenv("GITHUB_REPOSITORY") != "" {
+		base = strings.TrimSuffix(os.Getenv("GITHUB_SERVER_URL"), "/") + "/" + os.Getenv("GITHUB_REPOSITORY")
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return ""
+	}
+	marker := "/blob/"
+	if os.Getenv("GITLAB_CI") == "true" {
+		marker = "/-/blob/"
+	}
+	link := base + marker + commit + "/" + strings.Join(parts, "/")
+	if f.Location.Line > 0 {
+		link += fmt.Sprintf("#L%d", f.Location.Line)
+	}
+	return link
+}
+
+func printScanSummary(w io.Writer, b bundle, result uploadResult, base string) {
+	gate := "UNVERIFIED"
+	if result.GatePass != nil {
+		if *result.GatePass {
+			gate = "PASS"
+		} else {
+			gate = "FAIL"
+		}
+	}
+	fmt.Fprintf(w, "PANBOX %s | %s | %s\n", safeLog(releaseVersion), safeLog(b.Git.Branch), safeLog(b.Git.CommitSHA))
+	fmt.Fprintf(w, "Gate: %s | Scan: %s | Findings: %d | New: %d | Baseline unknown: %d\n", gate, safeLog(result.Status), len(b.Findings), result.New, result.BaselineUnknown)
+	for _, m := range b.Modules {
+		fmt.Fprintf(w, "Module %-7s %s (%s)\n", safeLog(strings.ToUpper(m.Name)), safeLog(m.Status), safeLog(m.Version))
+	}
+	counts := map[string]int{}
+	for _, f := range b.Findings {
+		counts[strings.ToLower(f.RawSeverity)]++
+	}
+	fmt.Fprintf(w, "Severity: critical %d | high %d | medium %d | low %d | info %d\n", counts["critical"], counts["high"], counts["medium"], counts["low"], counts["info"])
+	if len(b.Findings) > 0 {
+		if os.Getenv("GITLAB_CI") == "true" {
+			fmt.Fprintf(w, "section_start:%d:panbox_findings[collapsed=true]\r\033[0KFinding locations (top 10)\n", time.Now().Unix())
+		}
+		items := append([]finding(nil), b.Findings...)
+		severityRank := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+		sort.SliceStable(items, func(i, j int) bool { return severityRank[items[i].RawSeverity] < severityRank[items[j].RawSeverity] })
+		for i, f := range items {
+			if i == 10 {
+				fmt.Fprintf(w, "  … %d more findings in dashboard\n", len(items)-10)
+				break
+			}
+			fmt.Fprintf(w, "  %-8s %-42s %s:%d\n", safeLog(strings.ToUpper(f.RawSeverity)), safeLog(f.RuleID), safeLog(f.Location.Path), f.Location.Line)
+			if link := ciSourceURL(b, f); link != "" {
+				fmt.Fprintf(w, "    Source: %s\n", safeLog(link))
+			}
+		}
+		if os.Getenv("GITLAB_CI") == "true" {
+			fmt.Fprintf(w, "section_end:%d:panbox_findings\r\033[0K\n", time.Now().Unix())
+		}
+	}
+	fmt.Fprintf(w, "Dashboard: %s\n", safeLog(base+result.DashboardURL))
+}
+
 func run(args []string) int {
 	if len(args) == 0 {
 		usage()
@@ -391,13 +494,7 @@ func goScan(args []string) int {
 		fmt.Fprintf(os.Stderr, "server rejected scan (%d): %s\n", resp.StatusCode, payload)
 		return 2
 	}
-	var result struct {
-		ID, Status      string
-		GatePass        *bool  `json:"gate_pass"`
-		New             int    `json:"new"`
-		BaselineUnknown int    `json:"baseline_unknown"`
-		DashboardURL    string `json:"dashboard_url"`
-	}
+	var result uploadResult
 	if json.Unmarshal(payload, &result) != nil {
 		return 2
 	}
@@ -415,14 +512,7 @@ func goScan(args []string) int {
 		output, _ := json.Marshal(toSARIF(b, gate))
 		fmt.Println(string(output))
 	} else {
-		fmt.Printf("PANBOX scan %s · %s · %d findings · %d new · %d baseline unknown\n", result.ID, result.Status, len(b.Findings), result.New, result.BaselineUnknown)
-		for i, f := range b.Findings {
-			if i >= 3 {
-				break
-			}
-			fmt.Printf("  %s %s %s:%d\n", strings.ToUpper(f.RawSeverity), f.RuleID, f.Location.Path, f.Location.Line)
-		}
-		fmt.Printf("Dashboard: %s%s\n", base, result.DashboardURL)
+		printScanSummary(os.Stdout, b, result, base)
 	}
 	if result.Status != "complete" || result.GatePass == nil {
 		return 2

@@ -14,7 +14,52 @@ import (
 
 var commitPattern = regexp.MustCompile(`^[a-fA-F0-9]{7,64}$`)
 
+// Guidance links are curated public references. No finding content is sent to them.
 func findingGuidance(module, ruleID string) (string, string) {
+	reference, remediation := findingAdvice(module, ruleID)
+	if reference == "" && module == "vaccin" {
+		reference = guidanceReference(ruleID)
+	}
+	return reference, remediation
+}
+
+func guidanceReference(ruleID string) string {
+	const base = "https://cheatsheetseries.owasp.org/cheatsheets/"
+	switch {
+	case strings.Contains(ruleID, "csrf"):
+		return base + "Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "sql"):
+		return base + "SQL_Injection_Prevention_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "ssrf"), strings.Contains(ruleID, "request-url"), strings.Contains(ruleID, "http-request-url"), strings.Contains(ruleID, "axios-request-url"):
+		return base + "Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "redirect"), strings.Contains(ruleID, "location-header"):
+		return base + "Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "html"), strings.Contains(ruleID, "xss"), strings.Contains(ruleID, "template-safe"), strings.Contains(ruleID, "autoescape"):
+		return base + "Cross_Site_Scripting_Prevention_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "shell"), strings.Contains(ruleID, "command"), strings.Contains(ruleID, "exec"):
+		return base + "OS_Command_Injection_Defense_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "eval"):
+		return base + "Secure_Code_Review_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "pickle"), strings.Contains(ruleID, "deserialize"), strings.Contains(ruleID, "jsonpickle"), strings.Contains(ruleID, "dill"), strings.Contains(ruleID, "yaml"):
+		return base + "Deserialization_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "jwt"):
+		return base + "JSON_Web_Token_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "tls"), strings.Contains(ruleID, "ssl"), strings.Contains(ruleID, "hostname"):
+		return base + "Transport_Layer_Security_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "cookie"), strings.Contains(ruleID, "session"):
+		return base + "Session_Management_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "hash"), strings.Contains(ruleID, "cipher"), strings.Contains(ruleID, "random"):
+		return base + "Cryptographic_Storage_Cheat_Sheet.html"
+	case strings.Contains(ruleID, "path"), strings.Contains(ruleID, "file"):
+		return base + "Input_Validation_Cheat_Sheet.html"
+	case strings.HasPrefix(ruleID, "panbox.python.django-"), strings.HasPrefix(ruleID, "panbox.django."):
+		return "https://docs.djangoproject.com/en/5.2/topics/security/"
+	default:
+		return base + "Secure_Code_Review_Cheat_Sheet.html"
+	}
+}
+
+func findingAdvice(module, ruleID string) (string, string) {
 	if module == "enetron" {
 		if len(ruleID) > 120 {
 			return "", "Review the affected package and upgrade to a version outside the advisory's affected range; regenerate the lockfile and test."

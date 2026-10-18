@@ -17,6 +17,7 @@
 .finding-detail-links{display:flex;gap:8px;flex-wrap:wrap;padding:7px 36px 5px}
 .finding-detail-links a{display:inline-flex;align-items:center;gap:6px;color:var(--purple);font-size:12px;font-weight:700;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .finding-detail-links a:hover{border-color:var(--purple)}
+.remediation-panel .finding-detail-links{padding:0 0 15px;display:flex;align-items:flex-start;flex-direction:column;gap:5px}.remediation-panel .finding-detail-links small{color:var(--muted);font-size:11px}
 .finding-detail-section{margin:16px 36px 0;padding:23px 0;border-top:1px solid var(--line)}
 .finding-section-heading{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:14px}
 .finding-section-heading>div{min-width:0}

@@ -4,7 +4,7 @@ PANBOX is a lightweight, self-hosted AppSec dashboard and native scanning agent 
 
 This is an **alpha preview**. VACCIN and ENETRON are first-party PANBOX implementations. VACCIN includes native lexical rules for Java, JavaScript/TypeScript, Python/Django templates, PHP, and Go across injection, unsafe execution, XSS, SSRF, path traversal, deserialization, TLS/cookie controls, cryptography, and risky framework/API usage. Known bundled JavaScript is excluded from VACCIN to reduce noise. ENETRON parses resolved or pinned dependencies from npm, pnpm, Yarn, Bun, Python, Go, Maven/Gradle, and Composer inputs, then matches package versions to OSV advisory data over HTTPS. OSV supplies advisory data, not a scanner executable. If a repo has no supported dependency manifest, ENETRON is marked skipped and a completed VACCIN scan can still pass; malformed or unpinned manifests remain unverified. See the [detection coverage guide](docs/detection-coverage.md) for exact rule themes, manifest support, and limitations.
 
-Release `v0.1.0-alpha.7` adds 18 Python and 20 JavaScript/TypeScript checks for direct request-controlled operations and unsafe configuration. Run `panbox version` in CI to verify the agent release and scanner engine. The checks are lexical and have fixture tests; PANBOX has no measured detection or false-positive rate yet.
+Release `v0.1.0-alpha.7` added 18 Python and 20 JavaScript/TypeScript checks for direct request-controlled operations and unsafe configuration. Release `v0.1.0-alpha.8` adds clearer CI findings output, ten-row dashboard pagination, latest-scan timestamps, and public remediation references. Run `panbox version` in CI to verify the agent release and scanner engine. The checks are lexical and have fixture tests; PANBOX has no measured detection or false-positive rate yet.
 
 RIDER (secrets), TESLA (IaC), AI, approval workflows, executive report templates, and broad language/dataflow coverage are not implemented. A read-only local MCP bridge is available. See the detailed [English guide](docs/product-guide-en.md) and [Indonesian guide](docs/product-guide-id.md).
 
@@ -54,7 +54,7 @@ The [GitHub Releases page](https://github.com/alterwriter/PANBOX/releases) provi
 On a Linux/macOS CI runner, install only the agent into the job workspace at runtime:
 
 ```bash
-PANBOX_VERSION=v0.1.0-alpha.7
+PANBOX_VERSION=v0.1.0-alpha.8
 curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
 sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 .panbox/bin/panbox version
@@ -63,9 +63,9 @@ sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 
 Set `PANBOX_API_KEY` as a protected CI secret with `scans:write`; set `PANBOX_SERVER` to an API address the runner can reach. The installer selects OS/CPU and checks the downloaded binary against release `SHA256SUMS`; it does not need sudo. Existing alpha jobs may pass the API key through `PANBOX_TOKEN`. See the [English](docs/product-guide-en.md) or [Indonesian](docs/product-guide-id.md) guide. To build from source: `go build -o bin/panbox ./cmd/panbox`.
 
-1. For private GitHub/GitLab, Admin opens **Settings & Audit → SCM connections** and connects a GitHub App or GitLab service account with metadata access. PANBOX automatically discovers and enrolls permitted repositories; use Sync when SCM access changes. For other providers or manual setup, open **Repositories → Enroll repository**, enter its stable SCM path, and test metadata. The first authenticated job can supply a default branch when no SCM connection is available. Owner may be blank. PANBOX does not auto-enroll from scan uploads. [Connection and branch details](docs/product-guide-en.md#5-add-only-the-agent-to-ci).
+1. For private GitHub/GitLab, Admin opens **Settings & Audit → SCM connections** and connects a GitHub App or GitLab service account with metadata access. PANBOX discovers permitted repositories and enrolls them when auto-enroll is enabled; use Sync when SCM access changes. For other providers or manual setup, open **Repositories → Enroll repository**, enter its stable SCM path, and test metadata. The first authenticated job can supply a default branch when no SCM connection is available. Owner may be blank. PANBOX does not auto-enroll from scan uploads. [Connection and branch details](docs/product-guide-en.md#5-manage-github-and-gitlab-scm-connections).
 2. Copy the generated **PANBOX project ID** from the result dialog or Repositories table. It differs from the SCM path. Set CI variable `PANBOX_REPOSITORY_ID` to this ID.
-3. Create one ordinary **API key** with `scans:write` in the result dialog or **Settings & Audit -> API & access keys**. Store the one-time secret as protected CI secret `PANBOX_API_KEY`. A project scope is optional; the key owner's repository access remains enforced. No extra repository token is required. Lost key values cannot be retrieved from hashes; use **Rotate** to issue a replacement and revoke the old value. Full [English](docs/product-guide-en.md#5-add-only-the-agent-to-ci) and [Indonesian](docs/product-guide-id.md#5-tambahkan-hanya-agent-ke-ci) walkthroughs cover the first scan.
+3. Create one ordinary **API key** with `scans:write` in the result dialog or **Settings & Audit -> API & access keys**. Store the one-time secret as protected CI secret `PANBOX_API_KEY`. A project scope is optional; the key owner's repository access remains enforced. No extra repository token is required. Lost key values cannot be retrieved from hashes; use **Rotate** to issue a replacement and revoke the old value. Full [English](docs/product-guide-en.md#6-add-only-the-agent-to-ci) and [Indonesian](docs/product-guide-id.md#6-tambahkan-hanya-agent-ke-ci) walkthroughs cover the first scan.
 4. Run:
 
 ```bash

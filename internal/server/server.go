@@ -694,7 +694,7 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := who(r).Admin && r.URL.Query().Get("include_archived") == "1"
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,name,provider,provider_project_id,scm_base_url,default_branch,default_branch_source,owner,scm_check_status,archived_at,COALESCE(scm_connection_id,''),COALESCE((SELECT enabled FROM repository_scan_configs WHERE repository_id=repositories.id),true) FROM repositories WHERE archived_at IS NULL OR $1 ORDER BY name`, includeArchived)
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,name,provider,provider_project_id,scm_base_url,default_branch,default_branch_source,owner,scm_check_status,archived_at,COALESCE(scm_connection_id,''),COALESCE((SELECT enabled FROM repository_scan_configs WHERE repository_id=repositories.id),true),(SELECT max(created_at) FROM scans WHERE repository_id=repositories.id) FROM repositories WHERE archived_at IS NULL OR $1 ORDER BY name`, includeArchived)
 	if err != nil {
 		fail(w, 500, "database error")
 		return
@@ -704,13 +704,18 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, name, provider, project, baseURL, branch, branchSource, owner, checkStatus, connectionID string
 		var archived sql.NullTime
+		var lastScan sql.NullTime
 		var scanEnabled bool
-		if err := rows.Scan(&id, &name, &provider, &project, &baseURL, &branch, &branchSource, &owner, &checkStatus, &archived, &connectionID, &scanEnabled); err != nil {
+		if err := rows.Scan(&id, &name, &provider, &project, &baseURL, &branch, &branchSource, &owner, &checkStatus, &archived, &connectionID, &scanEnabled, &lastScan); err != nil {
 			fail(w, 500, "repository list failed")
 			return
 		}
 		if s.repoAllowed(r.Context(), who(r), id) {
-			item := map[string]any{"id": id, "name": name, "provider": provider, "provider_project_id": project, "scm_base_url": baseURL, "default_branch": branch, "default_branch_source": branchSource, "owner": owner, "scm_check_status": checkStatus, "scm_connection_id": connectionID, "scan_enabled": scanEnabled, "archived": archived.Valid}
+			var lastScanAt any
+			if lastScan.Valid {
+				lastScanAt = lastScan.Time
+			}
+			item := map[string]any{"id": id, "name": name, "provider": provider, "provider_project_id": project, "scm_base_url": baseURL, "default_branch": branch, "default_branch_source": branchSource, "owner": owner, "scm_check_status": checkStatus, "scm_connection_id": connectionID, "scan_enabled": scanEnabled, "archived": archived.Valid, "last_scan_at": lastScanAt}
 			out = append(out, item)
 		}
 	}

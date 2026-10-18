@@ -1,3 +1,11 @@
+## v0.1.0-alpha.8
+
+- CI text output now prints gate status, module results, severity counts, ten prioritized finding locations, and commit-pinned source links when CI metadata is available. GitLab folds the finding list; JSON and SARIF remain machine-readable.
+- The dashboard pages repository, finding, scan, and Overview rows ten at a time and shows the latest scan timestamp per repository across branches.
+- VACCIN finding detail keeps path and line prominent and links to curated OWASP or Django remediation guidance. ENETRON keeps its OSV advisory link. The advice is not an AI fix or exploitability verdict.
+- GitHub and GitLab SCM connection controls are explained in a dedicated English/Indonesian guide chapter, including the new-connection button and each lifecycle action.
+- The scanner rule engine remains `0.1.5`; this release changes agent presentation and dashboard/API behavior, not the detection signature set.
+
 ## v0.1.0-alpha.7
 
 - The agent-only release includes VACCIN engine `0.1.5` and 38 new Python/JavaScript/TypeScript lexical signatures with positive and negative fixtures. See [release notes](releases/v0.1.0-alpha.7.md).

@@ -65,6 +65,7 @@ func (s *Server) repoDetail(w http.ResponseWriter, r *http.Request) {
 	var name, provider, project, baseURL, branch, source, owner, check string
 	var archived sql.NullTime
 	var scans, findings int
+	var lastScan sql.NullTime
 	err := s.DB.QueryRowContext(r.Context(), `SELECT name,provider,provider_project_id,scm_base_url,default_branch,default_branch_source,owner,scm_check_status,archived_at FROM repositories WHERE id=$1`, id).Scan(&name, &provider, &project, &baseURL, &branch, &source, &owner, &check, &archived)
 	if err != nil {
 		fail(w, 404, "repository not found")
@@ -75,8 +76,13 @@ func (s *Server) repoDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.DB.QueryRowContext(r.Context(), `SELECT count(*) FROM scans WHERE repository_id=$1`, id).Scan(&scans)
+	_ = s.DB.QueryRowContext(r.Context(), `SELECT max(created_at) FROM scans WHERE repository_id=$1`, id).Scan(&lastScan)
 	_ = s.DB.QueryRowContext(r.Context(), `SELECT count(*) FROM findings WHERE repository_id=$1`, id).Scan(&findings)
-	jsonOut(w, 200, map[string]any{"id": id, "name": name, "provider": provider, "provider_project_id": project, "scm_base_url": baseURL, "default_branch": branch, "default_branch_source": source, "owner": owner, "scm_check_status": check, "archived": archived.Valid, "scan_count": scans, "finding_count": findings})
+	var lastScanAt any
+	if lastScan.Valid {
+		lastScanAt = lastScan.Time
+	}
+	jsonOut(w, 200, map[string]any{"id": id, "name": name, "provider": provider, "provider_project_id": project, "scm_base_url": baseURL, "default_branch": branch, "default_branch_source": source, "owner": owner, "scm_check_status": check, "archived": archived.Valid, "scan_count": scans, "finding_count": findings, "last_scan_at": lastScanAt})
 }
 
 func (s *Server) updateRepo(w http.ResponseWriter, r *http.Request) {
