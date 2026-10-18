@@ -20,8 +20,9 @@ done
 secret() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
 db_password=$(secret)
 admin_password=$(secret)
+scm_key=$(secret)
 umask 077
 set -C
-printf 'PANBOX_DB_PASSWORD=%s\nPANBOX_BOOTSTRAP_EMAIL=%s\nPANBOX_BOOTSTRAP_PASSWORD=%s\nPANBOX_SECURE_COOKIE=false\nPANBOX_HOST_PORT=%s\nPANBOX_DB_HOST_PORT=%s\n' \
-  "$db_password" "$admin_email" "$admin_password" "$host_port" "$db_port" > "$target"
+printf 'PANBOX_DB_PASSWORD=%s\nPANBOX_BOOTSTRAP_EMAIL=%s\nPANBOX_BOOTSTRAP_PASSWORD=%s\nPANBOX_SCM_ENCRYPTION_KEY=%s\nPANBOX_SECURE_COOKIE=false\nPANBOX_HOST_PORT=%s\nPANBOX_DB_HOST_PORT=%s\n' \
+  "$db_password" "$admin_email" "$admin_password" "$scm_key" "$host_port" "$db_port" > "$target"
 printf 'Created %s with private random credentials.\n' "$target"

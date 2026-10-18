@@ -27,7 +27,7 @@ func main() {
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
-	h := &http.Server{Addr: addr, Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	h := &http.Server{Addr: addr, Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 90 * time.Second, IdleTimeout: 60 * time.Second}
 	log.Printf("PANBOX listening on %s", addr)
 	log.Fatal(h.ListenAndServe())
 }

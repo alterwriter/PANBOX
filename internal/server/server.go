@@ -293,6 +293,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/credentials/{id}", s.protected(s.revokeCredential))
 	mux.HandleFunc("POST /v1/credentials/{id}/rotate", s.protected(s.rotateCredential))
 	mux.HandleFunc("GET /v1/repos", s.protected(s.repos))
+	mux.HandleFunc("GET /v1/scm-connections", s.protected(s.listConnections))
+	mux.HandleFunc("POST /v1/scm-connections", s.protected(s.saveConnection))
+	mux.HandleFunc("PUT /v1/scm-connections/{id}", s.protected(s.saveConnection))
+	mux.HandleFunc("DELETE /v1/scm-connections/{id}", s.protected(s.deleteConnection))
+	mux.HandleFunc("GET /v1/scm-connections/{id}/repositories", s.protected(s.discoverConnection))
+	mux.HandleFunc("POST /v1/scm-connections/{id}/sync", s.protected(s.syncConnection))
+	mux.HandleFunc("POST /v1/scm-connections/{id}/reinclude", s.protected(s.allowSCMReimport))
 	mux.HandleFunc("POST /v1/repos/inspect", s.protected(s.inspectRepo))
 	mux.HandleFunc("POST /v1/repos", s.protected(s.createRepo))
 	mux.HandleFunc("GET /v1/repos/{id}", s.protected(s.repoDetail))
@@ -687,7 +694,7 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := who(r).Admin && r.URL.Query().Get("include_archived") == "1"
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,name,provider,provider_project_id,scm_base_url,default_branch,default_branch_source,owner,scm_check_status,archived_at FROM repositories WHERE archived_at IS NULL OR $1 ORDER BY name`, includeArchived)
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,name,provider,provider_project_id,scm_base_url,default_branch,default_branch_source,owner,scm_check_status,archived_at,COALESCE(scm_connection_id,''),COALESCE((SELECT enabled FROM repository_scan_configs WHERE repository_id=repositories.id),true) FROM repositories WHERE archived_at IS NULL OR $1 ORDER BY name`, includeArchived)
 	if err != nil {
 		fail(w, 500, "database error")
 		return
@@ -695,14 +702,15 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []any{}
 	for rows.Next() {
-		var id, name, provider, project, baseURL, branch, branchSource, owner, checkStatus string
+		var id, name, provider, project, baseURL, branch, branchSource, owner, checkStatus, connectionID string
 		var archived sql.NullTime
-		if err := rows.Scan(&id, &name, &provider, &project, &baseURL, &branch, &branchSource, &owner, &checkStatus, &archived); err != nil {
+		var scanEnabled bool
+		if err := rows.Scan(&id, &name, &provider, &project, &baseURL, &branch, &branchSource, &owner, &checkStatus, &archived, &connectionID, &scanEnabled); err != nil {
 			fail(w, 500, "repository list failed")
 			return
 		}
 		if s.repoAllowed(r.Context(), who(r), id) {
-			item := map[string]any{"id": id, "name": name, "provider": provider, "provider_project_id": project, "scm_base_url": baseURL, "default_branch": branch, "default_branch_source": branchSource, "owner": owner, "scm_check_status": checkStatus, "archived": archived.Valid}
+			item := map[string]any{"id": id, "name": name, "provider": provider, "provider_project_id": project, "scm_base_url": baseURL, "default_branch": branch, "default_branch_source": branchSource, "owner": owner, "scm_check_status": checkStatus, "scm_connection_id": connectionID, "scan_enabled": scanEnabled, "archived": archived.Valid}
 			out = append(out, item)
 		}
 	}
@@ -720,7 +728,7 @@ func (s *Server) createRepo(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	check, err := inspectSCM(r.Context(), in.Provider, in.ProviderProjectID, in.SCMBaseURL)
+	check, err := s.inspectConnectedSCM(r.Context(), in.Provider, in.ProviderProjectID, in.SCMBaseURL, in.SCMConnectionID)
 	if err != nil {
 		fail(w, 500, "SCM inspection failed")
 		return
@@ -741,7 +749,7 @@ func (s *Server) createRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := core.ID()
-	_, err = s.DB.ExecContext(r.Context(), `INSERT INTO repositories(id,name,provider,provider_project_id,scm_base_url,default_branch,default_branch_source,owner,scm_check_status,scm_checked_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now())`, id, in.Name, in.Provider, in.ProviderProjectID, in.SCMBaseURL, in.DefaultBranch, in.BranchMode, in.Owner, check.Status)
+	_, err = s.DB.ExecContext(r.Context(), `INSERT INTO repositories(id,name,provider,provider_project_id,scm_base_url,default_branch,default_branch_source,owner,scm_check_status,scm_checked_at,scm_connection_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),NULLIF($10,''))`, id, in.Name, in.Provider, in.ProviderProjectID, in.SCMBaseURL, in.DefaultBranch, in.BranchMode, in.Owner, check.Status, check.ConnectionID)
 	if err != nil {
 		fail(w, 400, "repository already enrolled or invalid")
 		return

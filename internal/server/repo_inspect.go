@@ -20,6 +20,7 @@ type scmInspection struct {
 	Status        string `json:"status"`
 	DefaultBranch string `json:"default_branch,omitempty"`
 	Owner         string `json:"owner,omitempty"`
+	ConnectionID  string `json:"connection_id,omitempty"`
 	Message       string `json:"message"`
 }
 
@@ -202,11 +203,12 @@ func (s *Server) inspectRepo(w http.ResponseWriter, r *http.Request) {
 		Provider          string `json:"provider"`
 		ProviderProjectID string `json:"provider_project_id"`
 		SCMBaseURL        string `json:"scm_base_url"`
+		SCMConnectionID   string `json:"scm_connection_id"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	result, err := inspectSCM(r.Context(), strings.ToLower(strings.TrimSpace(in.Provider)), strings.TrimSpace(in.ProviderProjectID), strings.TrimSpace(in.SCMBaseURL))
+	result, err := s.inspectConnectedSCM(r.Context(), strings.ToLower(strings.TrimSpace(in.Provider)), strings.TrimSpace(in.ProviderProjectID), strings.TrimSpace(in.SCMBaseURL), strings.TrimSpace(in.SCMConnectionID))
 	if err != nil {
 		fail(w, 500, "SCM inspection failed")
 		return
@@ -223,18 +225,18 @@ func (s *Server) recheckRepoSCM(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "repository denied")
 		return
 	}
-	var provider, project, baseURL string
-	if err := s.DB.QueryRowContext(r.Context(), `SELECT provider,provider_project_id,scm_base_url FROM repositories WHERE id=$1 AND archived_at IS NULL`, id).Scan(&provider, &project, &baseURL); err != nil {
+	var provider, project, baseURL, connectionID string
+	if err := s.DB.QueryRowContext(r.Context(), `SELECT provider,provider_project_id,scm_base_url,COALESCE(scm_connection_id,'') FROM repositories WHERE id=$1 AND archived_at IS NULL`, id).Scan(&provider, &project, &baseURL, &connectionID); err != nil {
 		fail(w, 404, "repository not found")
 		return
 	}
-	result, err := inspectSCM(r.Context(), provider, project, baseURL)
+	result, err := s.inspectConnectedSCM(r.Context(), provider, project, baseURL, connectionID)
 	if err != nil {
 		fail(w, 500, "SCM inspection failed")
 		return
 	}
 	if result.Status == "verified" {
-		_, err = s.DB.ExecContext(r.Context(), `UPDATE repositories SET default_branch=CASE WHEN default_branch_source<>'manual' THEN $2 ELSE default_branch END,default_branch_source=CASE WHEN default_branch_source<>'manual' THEN 'auto' ELSE 'manual' END,owner=CASE WHEN owner='' THEN $3 ELSE owner END,scm_check_status=$4,scm_checked_at=now() WHERE id=$1`, id, result.DefaultBranch, result.Owner, result.Status)
+		_, err = s.DB.ExecContext(r.Context(), `UPDATE repositories SET default_branch=CASE WHEN default_branch_source<>'manual' THEN $2 ELSE default_branch END,default_branch_source=CASE WHEN default_branch_source<>'manual' THEN 'auto' ELSE 'manual' END,owner=CASE WHEN owner='' THEN $3 ELSE owner END,scm_check_status=$4,scm_checked_at=now(),scm_connection_id=COALESCE(NULLIF($5,''),scm_connection_id) WHERE id=$1`, id, result.DefaultBranch, result.Owner, result.Status, result.ConnectionID)
 	} else {
 		_, err = s.DB.ExecContext(r.Context(), `UPDATE repositories SET scm_check_status=$2,scm_checked_at=now() WHERE id=$1`, id, result.Status)
 	}

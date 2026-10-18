@@ -13,10 +13,12 @@ function New-Secret {
 }
 $db = New-Secret
 $admin = New-Secret
+$scmKey = New-Secret
 $lines = @(
   "PANBOX_DB_PASSWORD=$db",
   "PANBOX_BOOTSTRAP_EMAIL=$AdminEmail",
   "PANBOX_BOOTSTRAP_PASSWORD=$admin",
+  "PANBOX_SCM_ENCRYPTION_KEY=$scmKey",
   'PANBOX_SECURE_COOKIE=false',
   "PANBOX_HOST_PORT=$HostPort",
   "PANBOX_DB_HOST_PORT=$DBPort"

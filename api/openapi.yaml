@@ -2,12 +2,53 @@ openapi: 3.1.0
 info:
   title: PANBOX API
   version: 0.1.0
-  description: Beta self-hosted API. Enroll a project before its first scan; uploads require its PANBOX project ID and an API key with scans:write plus project access. Private SCM default branches can be learned from authenticated CI metadata. Scan uploads never auto-enroll.
+  description: Beta self-hosted API. Admin GitLab/GitHub connections can discover and enroll private repositories; uploads require each PANBOX project ID and an API key with scans:write plus project access. Scan uploads never auto-enroll.
 servers:
   - url: http://127.0.0.1:8080
 security:
   - bearerAuth: []
 paths:
+  /v1/scm-connections:
+    get:
+      description: Admin browser session only. List connection metadata; secrets are never returned.
+      responses: {'200': {description: SCM connections}}
+    post:
+      description: Admin browser session only. Test a GitLab service account or GitHub App, encrypt its credential, and auto-enroll accessible repositories when enabled. Reads at most 500 repositories per sync.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [provider, label, enabled, auto_enroll], properties: {provider: {type: string, enum: [gitlab, github]}, label: {type: string}, base_url: {type: string}, enabled: {type: boolean}, auto_enroll: {type: boolean}, token: {type: string, description: GitLab service account token with read_api}, app_id: {type: integer}, installation_id: {type: integer}, private_key: {type: string, description: GitHub App PEM key}}}
+      responses: {'200': {description: Connection saved with ID and optional import counts}, '422': {description: Provider test failed}}
+  /v1/scm-connections/{id}:
+    put:
+      description: Admin browser session only. Update label, enablement, auto-enrollment, or rotate credential. Provider and host stay fixed; omitted secrets retain the old value.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Connection updated}}
+    delete:
+      description: Admin browser session only. Delete connection credential; enrolled repositories and scan history remain.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Connection deleted}}
+  /v1/scm-connections/{id}/repositories:
+    get:
+      description: Admin browser session only. Discover up to 500 accessible repository paths and their PANBOX/exclusion state without importing them.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Discovered repositories and truncated flag}}
+  /v1/scm-connections/{id}/sync:
+    post:
+      description: Admin browser session only. Revalidate provider access, import new repositories and refresh auto-detected branch metadata. Requires enabled connection and auto_enroll.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Created, existing, ignored, and truncated counts}}
+  /v1/scm-connections/{id}/reinclude:
+    post:
+      description: Admin browser session only. Remove deliberate deletion exclusion; next Sync may import the repository again.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [path], properties: {path: {type: string}}}
+      responses: {'200': {description: Repository eligible for future sync}}
   /healthz:
     get:
       security: []
@@ -91,21 +132,21 @@ paths:
       parameters: [{name: include_archived, in: query, schema: {type: boolean}, description: Admin only}]
       responses: {'200': {description: Authorized repository list with SCM origin, default branch source, owner, archived status, and SCM check}}
     post:
-      description: Enroll an SCM project before its first scan. The server rechecks public SCM metadata. For private/unreachable metadata, auto branch mode remains pending until authenticated CI supplies git.default_branch; a feature branch upload does not become the default. Owner is optional display metadata. The response ID is PANBOX's internal project ID, not provider_project_id; use it as PANBOX_REPOSITORY_ID in CI. Requires repos:write.
+      description: Manually enroll an SCM project before its first scan. Connected GitLab/GitHub credentials verify private metadata; otherwise private/unreachable auto branch mode remains pending until CI supplies git.default_branch. Owner is display metadata. The response ID is PANBOX's internal project ID for PANBOX_REPOSITORY_ID. Requires repos:write.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {type: object, required: [name, provider, provider_project_id], properties: {name: {type: string}, provider: {type: string}, provider_project_id: {type: string}, scm_base_url: {type: string, description: HTTPS origin allowlisted in PANBOX_SCM_ALLOWED_HOSTS}, default_branch: {type: string}, branch_mode: {type: string, enum: [auto, manual]}, owner: {type: string}}}
+            schema: {type: object, required: [name, provider, provider_project_id], properties: {name: {type: string}, provider: {type: string}, provider_project_id: {type: string}, scm_base_url: {type: string, description: HTTPS origin allowlisted in PANBOX_SCM_ALLOWED_HOSTS}, scm_connection_id: {type: string}, default_branch: {type: string}, branch_mode: {type: string, enum: [auto, manual]}, owner: {type: string}}}
       responses: {'201': {description: Enrolled PANBOX project ID, detected or pending default branch, owner, and SCM check status}}
   /v1/repos/inspect:
     post:
-      description: Check SCM metadata from the PANBOX host before enrollment. Public hosted providers need no credential. This does not prove the CI runner can reach the SCM or PANBOX. Requires repos:write.
+      description: Check SCM metadata from the PANBOX host before enrollment. Connected GitLab/GitHub credentials can verify private repositories. This does not prove runner delivery. Requires repos:write.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {type: object, required: [provider, provider_project_id], properties: {provider: {type: string}, provider_project_id: {type: string}, scm_base_url: {type: string}}}
+            schema: {type: object, required: [provider, provider_project_id], properties: {provider: {type: string}, provider_project_id: {type: string}, scm_base_url: {type: string}, scm_connection_id: {type: string}}}
       responses: {'200': {description: 'SCM status: verified, reachable_no_branch, or manual_required; includes detected default_branch and owner when available'}}
   /v1/repos/{id}:
     get:
@@ -118,7 +159,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {type: object, required: [name, provider, provider_project_id, branch_mode], properties: {name: {type: string}, provider: {type: string}, provider_project_id: {type: string}, scm_base_url: {type: string}, default_branch: {type: string}, branch_mode: {type: string, enum: [auto, manual]}, owner: {type: string}}}
+            schema: {type: object, required: [name, provider, provider_project_id, branch_mode], properties: {name: {type: string}, provider: {type: string}, provider_project_id: {type: string}, scm_base_url: {type: string}, scm_connection_id: {type: string}, default_branch: {type: string}, branch_mode: {type: string, enum: [auto, manual]}, owner: {type: string}}}
       responses: {'200': {description: Repository updated}, '409': {description: Identity locked or duplicate}}
     delete:
       description: Admin only. Unscanned repositories are deleted; scanned repositories are archived and their keys revoked.
