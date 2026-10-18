@@ -21,7 +21,7 @@ import (
 )
 
 // Version identifies the built-in detection rules and lockfile parser.
-const Version = "0.1.2"
+const Version = "0.1.3"
 
 type Finding struct {
 	Module, RuleID, Severity, Path, Message, Identity string
@@ -453,6 +453,8 @@ func stripSource(source []byte, ext string, keepStrings bool) string {
 	return b.String()
 }
 
+var ErrNoDependencyManifest = errors.New("no supported dependency manifest found")
+
 type dependency struct{ ecosystem, name, version, path string }
 
 func dependencies(root string) ([]dependency, error) {
@@ -467,6 +469,9 @@ func dependencies(root string) ([]dependency, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(paths) == 0 {
+		return nil, ErrNoDependencyManifest
 	}
 	var out []dependency
 	seen := map[string]bool{}
@@ -711,6 +716,9 @@ func dependencies(root string) ([]dependency, error) {
 	sort.Slice(unique, func(i, j int) bool {
 		return unique[i].ecosystem+unique[i].name+unique[i].path < unique[j].ecosystem+unique[j].name+unique[j].path
 	})
+	if len(unique) == 0 {
+		return nil, errors.New("supported dependency manifest found but it contains no pinned/resolved package versions")
+	}
 	return unique, nil
 }
 
@@ -1017,9 +1025,6 @@ func Enetron(ctx context.Context, root, endpoint string) ([]Finding, error) {
 	deps, err := dependencies(root)
 	if err != nil {
 		return nil, err
-	}
-	if len(deps) == 0 {
-		return nil, errors.New("no supported pinned dependency manifest found; use an npm/pnpm/Yarn/Bun lockfile, pinned Python requirements or Pipfile/Poetry/uv/PDM lock, go.mod/go.sum, Maven pom.xml, gradle.lockfile, or composer.lock")
 	}
 	if len(deps) > 20000 {
 		return nil, errors.New("more than 20,000 pinned dependencies; narrow the scan path or split the repository")

@@ -32,6 +32,21 @@ func TestRejectSecretInBundle(t *testing.T) {
 	}
 }
 
+func TestSkippedDependencyModuleKeepsSourceScanComplete(t *testing.T) {
+	in := scanInput{SchemaVersion: "1.0", ClientScanID: "scan", Scope: "repo", RepositoryID: "repo"}
+	in.Git.Branch, in.Git.CommitSHA = "feature/demo", "deadbeef"
+	in.Modules = []moduleInput{{Name: "vaccin", Status: "complete"}, {Name: "enetron", Status: "skipped"}}
+	if err := validScan(in); err != nil {
+		t.Fatalf("valid source scan with not-applicable SCA was rejected: %v", err)
+	}
+	if status := statusOf(in.Modules); status != "complete" {
+		t.Fatalf("expected complete scan when VACCIN completed and ENETRON was not applicable, got %s", status)
+	}
+	if status := statusOf([]moduleInput{{Name: "enetron", Status: "skipped"}}); status != "partial" {
+		t.Fatalf("a scan with no completed module must stay unverified, got %s", status)
+	}
+}
+
 func TestIngestScopeIdempotencyAndReport(t *testing.T) {
 	dsn := os.Getenv("PANBOX_TEST_DATABASE_URL")
 	if dsn == "" {

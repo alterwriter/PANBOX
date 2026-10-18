@@ -38,7 +38,7 @@ ENETRON extracts pinned/resolved package coordinates from these repository files
 | Gradle | `gradle.lockfile` | Reads locked `group:artifact:version` entries. |
 | Composer / Packagist | `composer.lock` | Reads resolved packages. |
 
-Coordinates and versions are sent over HTTPS to OSV-compatible advisory API data (`POST /v1/querybatch`); PANBOX performs package parsing, querying, normalization, and dashboard workflows itself. OSV is the advisory-data source, not a scanner executable. The default endpoint is `https://api.osv.dev`; `PANBOX_ADVISORY_URL` or `--advisory-url` can select an approved compatible mirror. Queries are batched and paginated. A scan is marked incomplete if a supported manifest is absent, malformed, dependency volume exceeds 20,000, or the advisory service cannot provide a complete response. An advisory whose severity is unavailable is shown as `info` rather than silently dropped.
+Coordinates and versions are sent over HTTPS to OSV-compatible advisory API data (`POST /v1/querybatch`); PANBOX performs package parsing, querying, normalization, and dashboard workflows itself. OSV is the advisory-data source, not a scanner executable. The default endpoint is `https://api.osv.dev`; `PANBOX_ADVISORY_URL` or `--advisory-url` can select an approved compatible mirror. Queries are batched and paginated. When no supported dependency manifest exists, ENETRON is recorded as `skipped`; VACCIN can still complete the scan and gate. A malformed/unpinned manifest, dependency volume above 20,000, or advisory-service failure leaves ENETRON in error and the gate unverified. An advisory whose severity is unavailable is shown as `info` rather than silently dropped.
 
 ## Scope and roadmap
 

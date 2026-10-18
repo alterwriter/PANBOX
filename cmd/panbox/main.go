@@ -25,6 +25,7 @@ type module struct {
 	Engine  string `json:"engine"`
 	Version string `json:"version"`
 	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
 }
 type finding struct {
 	Module      string `json:"module"`
@@ -310,6 +311,13 @@ func goScan(args []string) int {
 				err = errors.New("unsupported module")
 			}
 			status := "complete"
+			moduleMessage := ""
+			if errors.Is(err, scanner.ErrNoDependencyManifest) {
+				fmt.Fprintln(os.Stderr, "enetron: skipped (no supported dependency manifest; source scan can still complete)")
+				status = "skipped"
+				moduleMessage = "No supported dependency manifest found; ENETRON did not apply to this repository."
+				err = nil
+			}
 			if err != nil {
 				fmt.Fprintln(os.Stderr, m+": "+err.Error())
 				status = "error"
@@ -321,7 +329,7 @@ func goScan(args []string) int {
 					b.Findings = append(b.Findings, f)
 				}
 			}
-			b.Modules = append(b.Modules, module{Name: m, Engine: "panbox-native", Version: scanner.Version, Status: status})
+			b.Modules = append(b.Modules, module{Name: m, Engine: "panbox-native", Version: scanner.Version, Status: status, Message: moduleMessage})
 		}
 		if failed && len(b.Modules) == 0 {
 			return 2

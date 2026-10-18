@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -171,8 +172,8 @@ func TestEnetronFollowsPerQueryOSVPagination(t *testing.T) {
 
 func TestEnetronNoManifestIsUnverified(t *testing.T) {
 	_, err := Enetron(context.Background(), t.TempDir(), "")
-	if err == nil {
-		t.Fatal("missing manifest must not silently pass")
+	if !errors.Is(err, ErrNoDependencyManifest) {
+		t.Fatalf("missing manifest should be reported as not applicable, got %v", err)
 	}
 }
 
