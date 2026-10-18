@@ -43,9 +43,10 @@ type bundle struct {
 	Scope         string `json:"scope"`
 	RepositoryID  string `json:"repository_id"`
 	Git           struct {
-		Branch    string `json:"branch"`
-		CommitSHA string `json:"commit_sha"`
-		BaseSHA   string `json:"base_sha"`
+		Branch        string `json:"branch"`
+		DefaultBranch string `json:"default_branch"`
+		CommitSHA     string `json:"commit_sha"`
+		BaseSHA       string `json:"base_sha"`
 	} `json:"git"`
 	Modules  []module  `json:"modules"`
 	Findings []finding `json:"findings"`
@@ -114,6 +115,20 @@ func git(path string, args ...string) string {
 	}
 	return strings.TrimSpace(string(b))
 }
+func ciAPIKey() string {
+	if key := os.Getenv("PANBOX_API_KEY"); key != "" {
+		return key
+	}
+	return os.Getenv("PANBOX_TOKEN") // Existing alpha jobs remain usable while migrating.
+}
+func ciDefaultBranch(path string) string {
+	for _, key := range []string{"PANBOX_DEFAULT_BRANCH", "CI_DEFAULT_BRANCH", "GITHUB_DEFAULT_BRANCH"} {
+		if branch := os.Getenv(key); branch != "" {
+			return branch
+		}
+	}
+	return strings.TrimPrefix(git(path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"), "origin/")
+}
 func baseServer(v string) (string, error) {
 	u, err := url.Parse(v)
 	if err != nil {
@@ -176,6 +191,7 @@ func goScan(args []string) int {
 	path := f.String("path", ".", "scan path")
 	mods := f.String("modules", "vaccin,enetron", "modules")
 	branch := f.String("branch", "", "Git branch")
+	defaultBranch := f.String("default-branch", "", "SCM default branch (auto from CI when available)")
 	commit := f.String("commit", "", "Git commit SHA")
 	baseSHA := f.String("base-sha", "", "base SHA")
 	advisoryURL := f.String("advisory-url", os.Getenv("PANBOX_ADVISORY_URL"), "OSV-compatible advisory API URL")
@@ -197,9 +213,9 @@ func goScan(args []string) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
-		token := os.Getenv("PANBOX_TOKEN")
+		token := ciAPIKey()
 		if token == "" {
-			fmt.Fprintln(os.Stderr, "PANBOX_TOKEN required")
+			fmt.Fprintln(os.Stderr, "PANBOX_API_KEY required (PANBOX_TOKEN is accepted for existing jobs)")
 			return 3
 		}
 		if *repo == "" {
@@ -256,6 +272,10 @@ func goScan(args []string) int {
 		b.ClientScanID = core.ID()
 		b.Scope = "repo"
 		b.RepositoryID = *repo
+		b.Git.DefaultBranch = *defaultBranch
+		if b.Git.DefaultBranch == "" {
+			b.Git.DefaultBranch = ciDefaultBranch(*path)
+		}
 		b.Git.Branch = *branch
 		if b.Git.Branch == "" {
 			for _, key := range []string{"CI_COMMIT_REF_NAME", "GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BITBUCKET_BRANCH", "BUILD_SOURCEBRANCHNAME"} {
@@ -326,9 +346,9 @@ func goScan(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	token := os.Getenv("PANBOX_TOKEN")
+	token := ciAPIKey()
 	if token == "" {
-		fmt.Fprintln(os.Stderr, "PANBOX_TOKEN required")
+		fmt.Fprintln(os.Stderr, "PANBOX_API_KEY required (PANBOX_TOKEN is accepted for existing jobs)")
 		return 3
 	}
 	raw, _ := json.Marshal(b)

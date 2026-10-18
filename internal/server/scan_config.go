@@ -18,7 +18,7 @@ type scanConfig struct {
 func (s *Server) scanConfigFor(repo string) (scanConfig, error) {
 	out := scanConfig{RepositoryID: repo, Enabled: true, Vaccin: true, Enetron: true, GateSeverity: "high", Version: 1}
 	var exists bool
-	if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM repositories WHERE id=$1)`, repo).Scan(&exists); err != nil {
+	if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM repositories WHERE id=$1 AND archived_at IS NULL)`, repo).Scan(&exists); err != nil {
 		return out, err
 	}
 	if !exists {
@@ -33,13 +33,13 @@ func (s *Server) scanConfigFor(repo string) (scanConfig, error) {
 
 func (s *Server) getScanConfig(w http.ResponseWriter, r *http.Request) {
 	p := who(r)
-	if !has(p, "repos:read") && !(p.Kind == "scan" && has(p, "scans:write")) {
+	if !has(p, "repos:read") && !((p.Kind == "scan" || p.Kind == "api") && has(p, "scans:write")) {
 		fail(w, 403, "permission denied")
 		return
 	}
 	repo := r.PathValue("id")
 	if !s.repoAllowed(r.Context(), p, repo) {
-		fail(w, 403, "repository denied")
+		fail(w, 403, "repository denied: check PANBOX project ID, API key repository scope, and key owner's repository access")
 		return
 	}
 	cfg, err := s.scanConfigFor(repo)

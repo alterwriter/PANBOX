@@ -1,14 +1,17 @@
 # Copy this job into .gitlab-ci.yml. Use a protected shell runner in an
 # isolated Linux VM on the PANBOX LAN. The job downloads only the agent.
-# Keep PANBOX_TOKEN a masked, protected CI variable. Protect runner and branches.
+# Set PANBOX_SERVER and PANBOX_REPOSITORY_ID as CI variables. Keep PANBOX_API_KEY
+# masked and protected. Protect runner and branches.
 panbox_scan:
   stage: test
   tags: [panbox-local]
   variables:
-    PANBOX_VERSION: v0.1.0-alpha.5
+    PANBOX_VERSION: v0.1.0-alpha.6
   script:
+    - git rev-parse --is-inside-work-tree
+    - curl -fsS "$PANBOX_SERVER/readyz"
     - curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
     - sh install-panbox-agent.sh "$PANBOX_VERSION" "$CI_PROJECT_DIR/.panbox/bin"
-    - '"$CI_PROJECT_DIR/.panbox/bin/panbox" go --server http://127.0.0.1:8080 --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$CI_COMMIT_REF_NAME" --commit "$CI_COMMIT_SHA" --base-sha "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}"'
+    - '"$CI_PROJECT_DIR/.panbox/bin/panbox" go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path . --branch "$CI_COMMIT_REF_NAME" --default-branch "$CI_DEFAULT_BRANCH" --commit "$CI_COMMIT_SHA" --base-sha "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}"'
   rules:
     - if: '$CI_COMMIT_REF_PROTECTED == "true"'

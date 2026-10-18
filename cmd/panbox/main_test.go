@@ -36,3 +36,15 @@ func TestGateExitCodes(t *testing.T) {
 		})
 	}
 }
+
+func TestCIIdentityFromEnvironment(t *testing.T) {
+	t.Setenv("PANBOX_API_KEY", "api-key")
+	t.Setenv("PANBOX_TOKEN", "old-key")
+	t.Setenv("CI_DEFAULT_BRANCH", "release")
+	if got := ciAPIKey(); got != "api-key" {
+		t.Fatalf("API key precedence: %q", got)
+	}
+	if got := ciDefaultBranch(t.TempDir()); got != "release" {
+		t.Fatalf("CI default branch: %q", got)
+	}
+}

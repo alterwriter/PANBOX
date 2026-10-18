@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: PANBOX API
   version: 0.1.0
-  description: Phase 1 self-hosted API. Scan uploads require a repository-bound scan key.
+  description: Beta self-hosted API. Enroll a project before its first scan; uploads require its PANBOX project ID and an API key with scans:write plus project access. Private SCM default branches can be learned from authenticated CI metadata. Scan uploads never auto-enroll.
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -76,23 +76,73 @@ paths:
     delete:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       responses: {'200': {description: Credential revoked}}
-  /v1/repos:
-    get:
-      responses: {'200': {description: Authorized repository list}}
+  /v1/credentials/{id}/rotate:
     post:
+      description: Key owner or Admin creates a replacement and revokes the prior API or access key. Plaintext is shown once; hashes cannot be copied back.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       requestBody:
         required: true
         content:
           application/json:
-            schema: {type: object, required: [name, provider, provider_project_id], properties: {name: {type: string}, provider: {type: string, pattern: '^[a-z][a-z0-9_-]{1,31}$'}, provider_project_id: {type: string}, default_branch: {type: string}, owner: {type: string}}}
-      responses: {'201': {description: Enrolled repository ID}}
+            schema: {type: object, required: [expires_hours], properties: {expires_hours: {type: integer, minimum: 1, maximum: 8760}}}
+      responses: {'201': {description: Replacement key with one-time plaintext}, '409': {description: Legacy scan key must be replaced with API key}}
+  /v1/repos:
+    get:
+      parameters: [{name: include_archived, in: query, schema: {type: boolean}, description: Admin only}]
+      responses: {'200': {description: Authorized repository list with SCM origin, default branch source, owner, archived status, and SCM check}}
+    post:
+      description: Enroll an SCM project before its first scan. The server rechecks public SCM metadata. For private/unreachable metadata, auto branch mode remains pending until authenticated CI supplies git.default_branch; a feature branch upload does not become the default. Owner is optional display metadata. The response ID is PANBOX's internal project ID, not provider_project_id; use it as PANBOX_REPOSITORY_ID in CI. Requires repos:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [name, provider, provider_project_id], properties: {name: {type: string}, provider: {type: string}, provider_project_id: {type: string}, scm_base_url: {type: string, description: HTTPS origin allowlisted in PANBOX_SCM_ALLOWED_HOSTS}, default_branch: {type: string}, branch_mode: {type: string, enum: [auto, manual]}, owner: {type: string}}}
+      responses: {'201': {description: Enrolled PANBOX project ID, detected or pending default branch, owner, and SCM check status}}
+  /v1/repos/inspect:
+    post:
+      description: Check SCM metadata from the PANBOX host before enrollment. Public hosted providers need no credential. This does not prove the CI runner can reach the SCM or PANBOX. Requires repos:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [provider, provider_project_id], properties: {provider: {type: string}, provider_project_id: {type: string}, scm_base_url: {type: string}}}
+      responses: {'200': {description: 'SCM status: verified, reachable_no_branch, or manual_required; includes detected default_branch and owner when available'}}
+  /v1/repos/{id}:
+    get:
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Repository detail and scan/finding counts}}
+    put:
+      description: Requires repos:write. SCM identity is locked after first scan; display name, owner, and default branch remain editable.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [name, provider, provider_project_id, branch_mode], properties: {name: {type: string}, provider: {type: string}, provider_project_id: {type: string}, scm_base_url: {type: string}, default_branch: {type: string}, branch_mode: {type: string, enum: [auto, manual]}, owner: {type: string}}}
+      responses: {'200': {description: Repository updated}, '409': {description: Identity locked or duplicate}}
+    delete:
+      description: Admin only. Unscanned repositories are deleted; scanned repositories are archived and their keys revoked.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: confirm, in: query, required: true, schema: {type: string}, description: Exact repository name}]
+      responses: {'200': {description: Deleted or archived}}
+  /v1/repos/{id}/restore:
+    post:
+      description: Admin only. Existing API keys retain their original scope; rotate or create a new key if access policy changed.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Repository restored}, '409': {description: Active SCM identity collision}}
+  /v1/repos/{id}/recheck-scm:
+    post:
+      description: Recheck enrolled SCM metadata; verified metadata refreshes only an auto-detected default branch. Manual overrides remain unchanged. Requires repos:write and repository access.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Updated SCM status and detected metadata}, '403': {description: Repository denied}, '404': {description: Repository not found}}
   /v1/repos/{id}/scan-tokens:
     post:
+      deprecated: true
+      description: Legacy alpha endpoint. New CI integrations create a normal API key with scans:write through /v1/credentials and use PANBOX_API_KEY.
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       responses: {'201': {description: Repository-bound one-time scan key}}
   /v1/repos/{id}/scan-config:
     get:
-      description: Requires repos:read or a repository-bound scan key. The agent reads this before an online scan.
+      description: Requires repos:read or a bearer API key with scans:write and project access. The agent reads this before an online scan.
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       responses: {'200': {description: Enabled modules and gate threshold}}
     put:
@@ -115,6 +165,7 @@ paths:
     get:
       responses: {'200': {description: Recent authorized scans}}
     post:
+      description: Requires a bearer API key with scans:write and project access. PANBOX_REPOSITORY_ID identifies the enrolled project; it is not a secret. Legacy scan keys continue to work for existing alpha jobs.
       requestBody:
         required: true
         content:
@@ -125,6 +176,10 @@ paths:
     get:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       responses: {'200': {description: Scan metadata and current gate revision}}
+  /v1/scans/{id}/findings:
+    get:
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Finding detail rows for this scan, including source link and remediation guidance}}
   /v1/findings:
     get:
       parameters:
@@ -132,7 +187,25 @@ paths:
         - {name: branch, in: query, schema: {type: string}}
         - {name: module, in: query, schema: {type: string}}
         - {name: severity, in: query, schema: {type: string}}
-      responses: {'200': {description: Authorized occurrence rows}}
+      responses: {'200': {description: Authorized branch finding rows with open, triaged, or resolved lifecycle status}}
+  /v1/findings/{id}:
+    get:
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: branch, in: query, required: true, schema: {type: string}}]
+      responses: {'200': {description: Finding detail, remediation, source URL when available, and last 100 eligible complete scans}}
+  /v1/findings/{id}/disposition:
+    post:
+      description: Requires findings:recast. Sets global triage state, records reason, and revises affected gates.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [status, reason], properties: {status: {type: string, enum: [open, false_positive, accepted_risk, closed]}, reason: {type: string, minLength: 10, maxLength: 500}}}
+      responses: {'200': {description: Triage saved and gates revised}}
+  /v1/findings/{id}/dispositions:
+    get:
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Recent immutable triage events}}
   /v1/findings/{id}/recast:
     post:
       description: Requires findings:recast and repository access. Updates effective severity across occurrences, recalculates affected gates, and records history. Use severity raw to restore scanner severity.
@@ -176,6 +249,6 @@ components:
         client_scan_id: {type: string}
         scope: {type: string, const: repo}
         repository_id: {type: string}
-        git: {type: object, required: [branch, commit_sha], properties: {branch: {type: string}, commit_sha: {type: string}, base_sha: {type: string}}}
+        git: {type: object, required: [branch, commit_sha], properties: {branch: {type: string}, default_branch: {type: string, description: Trusted CI metadata used only when enrolled branch source is ci_pending}, commit_sha: {type: string}, base_sha: {type: string}}}
         modules: {type: array, items: {type: object, required: [name, status], properties: {name: {type: string, enum: [vaccin, enetron]}, engine: {type: string}, version: {type: string}, status: {type: string, enum: [complete, error]}}}}
         findings: {type: array, items: {type: object, required: [module, rule_id, raw_severity], properties: {module: {type: string}, rule_id: {type: string}, raw_severity: {type: string, enum: [critical, high, medium, low, info]}, fingerprint: {type: string}, location: {type: object, properties: {path: {type: string}, line: {type: integer}}}, message: {type: string}}}}

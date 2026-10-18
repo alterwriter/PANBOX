@@ -1,6 +1,6 @@
 # PANBOX architecture
 
-This diagram describes the alpha implementation. The dashboard is a small self-hosted control plane; scan work runs on a separate machine or CI runner. A GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or other Git host can provide the checkout. PANBOX authorizes uploads through its own internal repository ID and a repository-bound scan key.
+This diagram describes the beta implementation. The dashboard is a small self-hosted control plane; scan work runs on a separate machine or CI runner. A GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or other Git host can provide the checkout. PANBOX authorizes uploads with a PANBOX project ID, an API key with `scans:write`, and repository access.
 
 ```mermaid
 flowchart LR
@@ -19,20 +19,25 @@ flowchart LR
         API -->|scan snapshots, findings, gate, RBAC, audit| DB[(PostgreSQL)]
         UI[React dashboard] -->|same-origin API| API
     end
-    AGENT -->|GET scan config + repo-bound key| API
-    AGENT -->|POST normalized scan bundle + same key| API
+    AGENT -->|GET scan config + API key| API
+    AGENT -->|POST normalized scan bundle + CI default branch| API
+    API -.->|public metadata check at enrollment| SCM
     BROWSER[Operator browser] -->|loopback or HTTPS reverse proxy| UI
     API -->|pass / fail / incomplete / auth exit outcome| AGENT
 ```
 
 ## What crosses each boundary
 
-1. The runner obtains a Git checkout through its SCM's normal CI flow. The PANBOX server does not clone source or run scanner jobs.
+Repository enrollment records the provider, SCM path, HTTPS origin, owner label, and default branch source (`auto`, `ci_pending`, `ci`, or `manual`). The metadata preflight uses an exact-host allowlist for self-hosted SCM. An API key may be project-scoped or valid across its owner's allowed projects; archived projects block upload and their project-bound keys are revoked. The VACCIN runner loads optional repository-local `.panbox/rules.json` with bounded Go regular expressions; a malformed file fails the module. Source stays on the runner. The API stores normalized findings and occurrences, then calculates branch state from the latest complete scan of the finding's module. Recast and disposition histories create new gate revisions without rewriting raw evidence. Only active, open findings contribute to posture totals; resolved findings remain queryable.
+
+1. Before the first CI run, an operator tests SCM connectivity during enrollment. Public metadata supplies the default branch. Private or unreachable metadata leaves `ci_pending`; the first authenticated job can supply the default branch from CI metadata even while scanning a feature branch. Self-managed Git hosts need their exact HTTPS host in `PANBOX_SCM_ALLOWED_HOSTS`. The API creates a PANBOX project ID; an authorized manager creates an API key with `scans:write`. Owner is display metadata. PANBOX never clones source or auto-enrolls from uploads.
 2. The agent checks selected source patterns with VACCIN and pinned dependency manifests with ENETRON. ENETRON sends **package names and versions** to the configured OSV-compatible advisory API over HTTPS. It does not send source files to that advisory endpoint. The alpha needs that advisory API for ENETRON; `--offline` suppresses dashboard upload only.
-3. Before an online scan, the agent sends `GET /v1/repos/{internal-id}/scan-config` with `Authorization: Bearer <scan-key>`. It reads whether scanning is enabled, which modules may run, and the gate threshold. The server validates the key against the internal repository ID. Offline scans skip this fetch and are checked when imported.
+3. Before an online scan, the agent sends `GET /v1/repos/{project-id}/scan-config` with `Authorization: Bearer <api-key>`. The server checks `scans:write`, optional key project scope, key owner membership or Admin, and project active state. Offline scans skip this fetch and are checked when imported.
 4. The agent sends a normalized JSON bundle to `POST /v1/scans` with the same header. It contains repository/branch/commit identity, module status, rule IDs, severities, paths/lines, and short messages. It does not contain raw source snippets. The server checks module permissions again, writes the snapshot, and returns a gate result. A partial or error scan is unverified and does not replace the last successful posture.
 5. The Go API stores scan policies, scans, findings, severity recast history, gate revisions, roles/permissions, key hashes, and audit events in PostgreSQL. Operators configure scan policy in Repositories, recast findings in Findings, and export filtered CSV/JSON/PDF from Reports. A recast updates effective severity on occurrences and recalculates affected gate revisions using each scan's original threshold; raw severity remains intact.
 6. The browser reaches the dashboard on loopback by default. Remote browser access needs a private route or an HTTPS reverse proxy. PostgreSQL should remain private. A local `panbox mcp` stdio process can expose read-only API data to an MCP host using a scoped access key.
+
+Each uploaded bundle carries its current branch and optionally the SCM default branch from trusted CI metadata. Feature branches appear separately without reenrollment. The enrolled default branch drives Overview posture; when enrollment was `ci_pending`, CI metadata establishes that baseline without assuming the scanned branch is default. Later CI metadata refreshes CI-sourced defaults; a manual override remains authoritative. Runner-to-PANBOX connectivity and API key authorization are checked separately through `/readyz` and `/v1/repos/{id}/scan-config` from the runner.
 
 ## Public CI to a dashboard without a public IP
 

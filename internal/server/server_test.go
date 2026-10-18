@@ -26,6 +26,10 @@ func TestRejectSecretInBundle(t *testing.T) {
 	if err := validScan(in); err != nil {
 		t.Fatal(err)
 	}
+	in.Git.DefaultBranch = "../main"
+	if err := validScan(in); err == nil {
+		t.Fatal("invalid CI default branch accepted")
+	}
 }
 
 func TestIngestScopeIdempotencyAndReport(t *testing.T) {
@@ -69,9 +73,40 @@ func TestIngestScopeIdempotencyAndReport(t *testing.T) {
 		s.Handler().ServeHTTP(rec, req)
 		return rec
 	}
+	repoFromCI := core.ID()
+	if _, err = s.DB.Exec(`INSERT INTO repositories(id,name,provider,provider_project_id,default_branch,default_branch_source) VALUES($1,$2,'gitlab',$3,'','ci_pending')`, repoFromCI, repoFromCI, repoFromCI); err != nil {
+		t.Fatal(err)
+	}
+	apiSecret := core.Secret("pb_api_")
+	if _, err = s.DB.Exec(`INSERT INTO credentials(id,owner_id,kind,label,secret_hash,scopes,expires_at) VALUES($1,$2,'api','CI',$3,'["scans:write"]',now()+interval '1 hour')`, core.ID(), user, core.Hash(apiSecret)); err != nil {
+		t.Fatal(err)
+	}
+	if response := call("GET", "/v1/repos/"+repoFromCI+"/scan-config", apiSecret, nil); response.Code != 200 {
+		t.Fatalf("API key policy %d: %s", response.Code, response.Body.String())
+	}
 	makeBundle := func(repo, client, branch, commit, base string, findings []map[string]any) []byte {
 		b, _ := json.Marshal(map[string]any{"schema_version": "1.0", "client_scan_id": client, "scope": "repo", "repository_id": repo, "git": map[string]string{"branch": branch, "commit_sha": commit, "base_sha": base}, "modules": []map[string]string{{"name": "vaccin", "engine": "panbox-native", "version": "0.1.0", "status": "complete"}}, "findings": findings})
 		return b
+	}
+	var ciBundle map[string]any
+	_ = json.Unmarshal(makeBundle(repoFromCI, "feature-first", "feature/login", "abcdef0123456789", "", nil), &ciBundle)
+	ciBundle["git"].(map[string]any)["default_branch"] = "release"
+	ciJSON, _ := json.Marshal(ciBundle)
+	if response := call("POST", "/v1/scans", apiSecret, ciJSON); response.Code != 201 {
+		t.Fatalf("API key upload %d: %s", response.Code, response.Body.String())
+	}
+	var learned, source string
+	if err = s.DB.QueryRow(`SELECT default_branch,default_branch_source FROM repositories WHERE id=$1`, repoFromCI).Scan(&learned, &source); err != nil || learned != "release" || source != "ci" {
+		t.Fatalf("CI default branch %q %q: %v", learned, source, err)
+	}
+	ciBundle["client_scan_id"] = "feature-second"
+	ciBundle["git"].(map[string]any)["default_branch"] = "stable"
+	ciJSON, _ = json.Marshal(ciBundle)
+	if response := call("POST", "/v1/scans", apiSecret, ciJSON); response.Code != 201 {
+		t.Fatalf("API key second upload %d: %s", response.Code, response.Body.String())
+	}
+	if err = s.DB.QueryRow(`SELECT default_branch,default_branch_source FROM repositories WHERE id=$1`, repoFromCI).Scan(&learned, &source); err != nil || learned != "stable" || source != "ci" {
+		t.Fatalf("refreshed CI default branch %q %q: %v", learned, source, err)
 	}
 	finding := func(fp, severity string) map[string]any {
 		return map[string]any{"module": "vaccin", "rule_id": "rule", "raw_severity": severity, "fingerprint": fp, "location": map[string]any{"path": "a.go", "line": 10}, "message": "safe summary"}
@@ -229,7 +264,7 @@ func TestAdminCanIssueAndRevokeScopedKey(t *testing.T) {
 		t.Fatalf("revoked key accepted %d", got.Code)
 	}
 	unique := core.ID()
-	enroll := call("POST", "/v1/repos", `{"name":"membership-test","provider":"gitlab","provider_project_id":"`+unique+`","default_branch":"main"}`, cookie, auth.CSRF, "")
+	enroll := call("POST", "/v1/repos", `{"name":"membership-test","provider":"gitlab","provider_project_id":"demo/`+unique+`","default_branch":"main"}`, cookie, auth.CSRF, "")
 	if enroll.Code != 201 {
 		t.Fatalf("enroll %d: %s", enroll.Code, enroll.Body.String())
 	}

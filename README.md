@@ -44,33 +44,38 @@ Open `http://127.0.0.1:8080` or the configured `PANBOX_HOST_PORT`, then sign in 
 
 ## Agent binary and scanning
 
+**Pilot controls:** Repository rows open detail, edit, scan policy, archive/remove, and restore actions. Admin can remove a mistaken enrollment: unscanned repositories are deleted, while scanned repositories are archived and project-bound credentials revoked. The default branch comes from public SCM metadata or, for private SCM, authenticated CI metadata on the first upload; manual override is available. GitHub Enterprise and GitLab self-managed use an HTTPS origin allowlisted in `PANBOX_SCM_ALLOWED_HOSTS`. Findings retain branch history and become resolved when absent from the next complete scan of their module. Recast and triage actions require an audited reason and revise affected gates. VACCIN reads optional repository-local rules from `.panbox/rules.json`; see the [guides](docs/product-guide-en.md). Detection coverage remains narrow and no false-positive rate is established.
+
 The [GitHub Releases page](https://github.com/alterwriter/PANBOX/releases) provides **single agent binaries** for Linux, macOS, and Windows on amd64/arm64, plus checksum-verified installers. Archives remain for manual installs. The dashboard is distributed separately through Docker Compose. No host Node, Python, Semgrep, or Grype installation is needed for the agent.
 
 On a Linux/macOS CI runner, install only the agent into the job workspace at runtime:
 
 ```bash
-PANBOX_VERSION=v0.1.0-alpha.5
+PANBOX_VERSION=v0.1.0-alpha.6
 curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
 sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 .panbox/bin/panbox go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path .
 ```
 
-Set `PANBOX_TOKEN` as a protected CI secret and `PANBOX_SERVER` to an API address the runner can reach. The installer selects OS/CPU and checks the downloaded binary against release `SHA256SUMS`; it does not need sudo. See the [English](docs/product-guide-en.md) or [Indonesian](docs/product-guide-id.md) guide for server setup, Windows, and transport choices. To build from source: `go build -o bin/panbox ./cmd/panbox`.
+Set `PANBOX_API_KEY` as a protected CI secret with `scans:write`; set `PANBOX_SERVER` to an API address the runner can reach. The installer selects OS/CPU and checks the downloaded binary against release `SHA256SUMS`; it does not need sudo. Existing alpha jobs may pass the API key through `PANBOX_TOKEN`. See the [English](docs/product-guide-en.md) or [Indonesian](docs/product-guide-id.md) guide. To build from source: `go build -o bin/panbox ./cmd/panbox`.
 
-1. In **Repositories**, choose the SCM provider (GitHub, GitLab, Bitbucket, Azure Repos, Gitea, or Other Git) and enter its stable repository ID/path. PANBOX assigns a separate internal repository ID.
-2. Generate a repository-bound **scan key**. Store it as CI secret `PANBOX_TOKEN`, and set `PANBOX_REPOSITORY_ID` to the PANBOX ID. The server checks the token's repository binding; Git remote text is never trusted as authorization.
-3. Run:
+1. Before the first scan, open **Repositories -> Enroll repository**. Choose the SCM provider and enter a display name and stable SCM path/ID. Test SCM connectivity. Public metadata fills the default branch. For private GitLab, leave **Auto-detect** selected; the first authenticated job reports `CI_DEFAULT_BRANCH` even when scanning a feature branch. Owner may be blank. PANBOX does not auto-enroll projects from scans. [Connection and branch details](docs/product-guide-en.md#5-add-only-the-agent-to-ci).
+2. Copy the generated **PANBOX project ID** from the result dialog or Repositories table. It differs from the SCM path. Set CI variable `PANBOX_REPOSITORY_ID` to this ID.
+3. Create one ordinary **API key** with `scans:write` in the result dialog or **Settings & Audit -> API & access keys**. Store the one-time secret as protected CI secret `PANBOX_API_KEY`. A project scope is optional; the key owner's repository access remains enforced. No extra repository token is required. Lost key values cannot be retrieved from hashes; use **Rotate** to issue a replacement and revoke the old value. Full [English](docs/product-guide-en.md#5-add-only-the-agent-to-ci) and [Indonesian](docs/product-guide-id.md#5-tambahkan-hanya-agent-ke-ci) walkthroughs cover the first scan.
+4. Run:
 
 ```bash
 panbox ready --server http://127.0.0.1:8080
-PANBOX_TOKEN='<scan-key>' panbox go --server http://127.0.0.1:8080 --repo '<internal-id>' --path .
+PANBOX_API_KEY='<api-key>' panbox go --server http://127.0.0.1:8080 --repo '<panbox-project-id>' --path .
 ```
 
-`panbox go` accepts `--branch`, `--commit`, `--base-sha`, `--modules vaccin,enetron`, `--advisory-url`, and `--format text|json|sarif`. It reads branch names from common GitHub, GitLab, Bitbucket, and Azure CI variables, then falls back to Git. `--offline --output panbox-results.json` writes a bundle without uploading it; **offline refers only to dashboard delivery**. ENETRON still queries the advisory API unless omitted with `--modules vaccin`. An offline bundle may later be imported on a trusted local host with `PANBOX_TOKEN=... panbox go --server ... --bundle panbox-results.json`.
+`panbox go` accepts `--branch`, `--default-branch`, `--commit`, `--base-sha`, `--modules vaccin,enetron`, `--advisory-url`, and `--format text|json|sarif`. It reads the current branch from CI variables or Git and default branch from `PANBOX_DEFAULT_BRANCH`, GitLab `CI_DEFAULT_BRANCH`, or Git remote HEAD. `--offline --output panbox-results.json` writes a bundle without dashboard upload; ENETRON still queries the advisory API unless omitted. A trusted local host can later import the bundle with `PANBOX_API_KEY=... panbox go --server ... --bundle panbox-results.json`.
 
-For each **online** scan, the agent authenticates `GET /v1/repos/{id}/scan-config`, scans the enabled modules, then uploads one normalized JSON bundle to `POST /v1/scans` with the same scan key in the `Authorization: Bearer` header. The server checks the repository binding, stores the snapshot, evaluates the configured gate threshold, and returns the verdict. The agent maps it to its process exit code. Use **Repositories -> Scan policy** to pause scans, enable modules, or set the gate threshold. `--modules` may narrow the enabled set, but cannot enable a module disabled by the dashboard. Offline scans cannot fetch policy and their later import is checked against the current server policy.
+Each scan reports its own branch, so feature branches appear in Scans, Findings, and filtered Reports once CI runs PANBOX on them. PANBOX does not trigger pipelines itself; the GitLab example runs on protected branches, including protected nondefault branches. The default branch remains the Overview baseline, including when the first scan came from another branch. **Recheck SCM** refreshes auto-detected metadata when the provider is reachable. `PANBOX_SCM_ALLOWED_HOSTS` permits metadata checks for self-managed SCM; private credentials stay with the runner.
 
-In **Findings**, a user with `findings:recast` can choose **Recast**, set an effective severity (or restore the scanner value), and enter an audited reason. Raw severity never changes; affected historic gate revisions are recalculated against their original thresholds. **Reports** exports the latest complete snapshots as CSV, JSON, or PDF, filtered by repository, branch, scan module, and severity. The PDF is a readable technical summary; CSV/JSON retain the full row data.
+For each **online** scan, the agent authenticates `GET /v1/repos/{id}/scan-config`, scans the enabled modules, then uploads one normalized JSON bundle to `POST /v1/scans` with the same API key in the `Authorization: Bearer` header. The server checks `scans:write`, key scope, key owner access, and project ID; it stores the snapshot and evaluates the gate. Use **Repositories -> Scan policy** to pause scans, enable modules, or set the threshold. Offline scans cannot fetch policy and their later import is checked against current policy.
+
+In **Findings**, select **Recast severity** beside a finding rule to set an effective severity (or restore the scanner value) with an audited reason. The button needs `findings:recast` and repository access; if no rows appear, complete the first scan or clear filters. Raw severity never changes; affected historic gate revisions are recalculated against their original thresholds. **Reports** exports the latest complete snapshots as CSV, JSON, or PDF, filtered by repository, branch, scan module, and severity. The PDF is a readable technical summary; CSV/JSON retain the full row data.
 
 For an MCP host, generate a read-only **Access key** with `repos:read`, `scans:read`, and `findings:read` in **Settings & Audit -> API & access keys**. In **Settings & Audit -> MCP setup**, copy the generic stdio configuration for `panbox mcp`; set `PANBOX_SERVER` and `PANBOX_TOKEN` in the MCP host's secret environment. The bridge exposes read-only repositories, findings, and scans and uses the API's RBAC and repository scope.
 
@@ -86,7 +91,7 @@ The repository can be public while PANBOX has no public IP or domain. These tran
 | Reverse SSH tunnel from PANBOX to a reachable relay, plus a forward tunnel from CI | None | Yes | `deploy/gitlab-ci-ssh-relay.yml` |
 | CI artifact fetched and imported by PANBOX host | None | No | `deploy/gitlab-ci-pull-artifact.yml` (GitLab API), or any SCM artifact download followed by `panbox go --bundle` |
 
-A local runner polls the SCM over outbound HTTPS and posts scan results to PANBOX on its private network. Protect the runner, branch, and scan key; do not run untrusted pull request code with a scan key. For an SSH relay, pin host keys and restrict both SSH identities. The relay must be publicly reachable, while PANBOX itself needs no inbound route. Artifact pull is asynchronous and cannot enforce a CI gate; the included automated pull implementation currently covers GitLab, while the bundle import works with artifacts from any SCM.
+A local runner polls the SCM over outbound HTTPS and posts scan results to PANBOX on its private network. Protect the runner, branch, and API key; do not expose the key to untrusted pull request code. For an SSH relay, pin host keys and restrict both SSH identities. The relay must be publicly reachable, while PANBOX itself needs no inbound route. Artifact pull is asynchronous and cannot enforce a CI gate; the included automated pull implementation currently covers GitLab, while the bundle import works with artifacts from any SCM.
 
 ## Access control and resources
 
