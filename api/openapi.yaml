@@ -130,7 +130,7 @@ paths:
   /v1/repos:
     get:
       parameters: [{name: include_archived, in: query, schema: {type: boolean}, description: Admin only}]
-      responses: {'200': {description: Authorized repository list with SCM origin, default branch source, owner, archived status, and SCM check}}
+      responses: {'200': {description: Authorized repository list with SCM origin, default branch source, owner, archived status, SCM check, and nullable last_scan_at from any branch}}
     post:
       description: Manually enroll an SCM project before its first scan. Connected GitLab/GitHub credentials verify private metadata; otherwise private/unreachable auto branch mode remains pending until CI supplies git.default_branch. Owner is display metadata. The response ID is PANBOX's internal project ID for PANBOX_REPOSITORY_ID. Requires repos:write.
       requestBody:
@@ -151,7 +151,7 @@ paths:
   /v1/repos/{id}:
     get:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: Repository detail and scan/finding counts}}
+      responses: {'200': {description: Repository detail, scan/finding counts, and nullable last_scan_at from any branch}}
     put:
       description: Requires repos:write. SCM identity is locked after first scan; display name, owner, and default branch remain editable.
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
@@ -220,7 +220,7 @@ paths:
   /v1/scans/{id}/findings:
     get:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: Finding detail rows for this scan, including source link and remediation guidance}}
+      responses: {'200': {description: Finding detail rows for this scan, including source path and line, commit-pinned source link when available, rule-relevant public reference URL, and remediation guidance}}
   /v1/findings:
     get:
       parameters:
@@ -228,11 +228,11 @@ paths:
         - {name: branch, in: query, schema: {type: string}}
         - {name: module, in: query, schema: {type: string}}
         - {name: severity, in: query, schema: {type: string}}
-      responses: {'200': {description: Authorized branch finding rows with open, triaged, or resolved lifecycle status}}
+      responses: {'200': {description: Up to 1000 authorized branch finding rows with path and line, public guidance URL, and open, triaged, or resolved lifecycle status}}
   /v1/findings/{id}:
     get:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: branch, in: query, required: true, schema: {type: string}}]
-      responses: {'200': {description: Finding detail with rule-specific or general remediation guidance, source URL when available, and last 100 eligible complete scans. Guidance is advisory and does not establish exploitability.}}
+      responses: {'200': {description: Finding detail with rule-specific or general remediation guidance, commit-pinned source URL when available, curated OWASP/Django or OSV reference_url, and last 100 eligible complete scans. Guidance is advisory and does not establish exploitability.}}
   /v1/findings/{id}/disposition:
     post:
       description: Requires findings:recast. Sets global triage state, records reason, and revises affected gates.

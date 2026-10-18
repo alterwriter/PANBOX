@@ -17,4 +17,5 @@ pre.secret-box code{white-space:pre-wrap;overflow-wrap:anywhere}
 .scm-form label:has(input[type=checkbox]){display:flex;align-items:center;gap:8px}
 .scm-form input[type=checkbox]{width:auto}
 .scm-discovery{max-height:360px;overflow:auto}
+.scm-onboarding{border:1px solid var(--line);background:var(--surface2);padding:16px;border-radius:10px;margin:18px 0}.scm-onboarding h3{margin:0 0 8px;font-size:15px}.scm-onboarding p{line-height:1.55;margin:0 0 13px}.row-pager{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--line);padding-top:16px;margin-top:12px;color:var(--muted);font-size:11px}.row-pager>div{display:flex;align-items:center;gap:10px}.row-pager button{background:var(--surface2);border:1px solid var(--line);color:var(--text);padding:7px 10px;border-radius:6px;font-size:11px}.row-pager button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:680px){.row-pager{align-items:flex-start;flex-direction:column}}
 @media(max-width:650px){.scm-item{align-items:flex-start;flex-direction:column}}
