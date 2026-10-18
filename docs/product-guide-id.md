@@ -156,4 +156,4 @@ Host Debian 2 GB adalah **target untuk divalidasi**, bukan jaminan. Fixture keci
 
 Yang tersedia: server/UI, pemeriksaan source native VACCIN, pencocokan dependensi tetap native ENETRON dengan data OSV, snapshot repo/branch, gate, RBAC, key berscope, audit, ekspor PDF/CSV/JSON terfilter, serta contoh jalur koneksi di atas. Validasi runner nyata, OSV/mirror, beban Debian, backup/restore, TLS, dan rotasi key di lingkungan target.
 
-Cakupan masih sempit. RIDER secrets, TESLA IaC, alur persetujuan, template PDF eksekutif, AI Security, OIDC, dan rate limiting API masih roadmap. PDF ini panduan produk, bukan laporan kerentanan PANBOX.
+Cakupan masih sempit. RIDER secrets, TESLA IaC, alur persetujuan, template laporan PDF eksekutif, AI Security, OIDC, dan rate limiting API masih roadmap. Panduan online ini menjelaskan pilot; laporan kerentanan PANBOX diekspor terpisah dari dashboard.

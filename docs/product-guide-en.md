@@ -156,4 +156,4 @@ The 2 GB Debian host is a **target to validate**, not a guarantee. A small Windo
 
 Available now: server/UI, native VACCIN source checks, native ENETRON pinned dependency matching with OSV data, repository/branch snapshots, gate, RBAC, scoped keys, audit, filtered PDF/CSV/JSON exports, and the transport examples above. Validate real runners, OSV access or approved mirror, Debian load, backup/restore, TLS, and key rotation in your environment.
 
-Coverage is intentionally narrow. RIDER secrets, TESLA IaC, approval workflows, executive PDF templates, AI Security, OIDC, and API rate limiting are roadmap items. This PDF is a product guide, not a PANBOX vulnerability report.
+Coverage is intentionally narrow. RIDER secrets, TESLA IaC, approval workflows, executive PDF report templates, AI Security, OIDC, and API rate limiting are roadmap items. This online guide describes the pilot; PANBOX vulnerability reports are exported separately from the dashboard.
