@@ -1,0 +1,19 @@
+[Unit]
+Description=PANBOX optional Codex AI review worker
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=panbox-ai
+Group=panbox-ai
+WorkingDirectory=/opt/panbox
+EnvironmentFile=/etc/panbox/ai-worker.env
+ExecStart=/opt/panbox/panbox-ai-worker
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

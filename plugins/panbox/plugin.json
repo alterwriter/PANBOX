@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "panbox",
+  "version": "0.1.0",
+  "description": "Inspect PANBOX repositories, scans and findings through a scoped local MCP bridge.",
+  "author": {"name": "BOXSPLOIT LABS"},
+  "repository": "https://github.com/alterwriter/PANBOX",
+  "extensions": {"com.openai": {"requires_local_executor": true, "interface": {"displayName": "PANBOX", "shortDescription": "Review PANBOX scans and findings", "developerName": "BOXSPLOIT LABS", "category": "Productivity", "capabilities": ["Read"]}}}
+}

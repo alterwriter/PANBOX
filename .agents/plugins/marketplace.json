@@ -1,0 +1,10 @@
+{
+  "name": "panbox-local",
+  "interface": {"displayName": "PANBOX Local"},
+  "plugins": [{
+    "name": "panbox",
+    "source": {"source": "local", "path": "./plugins/panbox"},
+    "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+    "category": "Productivity"
+  }]
+}

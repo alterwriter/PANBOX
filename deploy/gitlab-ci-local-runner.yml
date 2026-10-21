@@ -7,7 +7,7 @@ panbox_scan:
   stage: test
   image: alpine:3.22
   variables:
-    PANBOX_VERSION: v0.1.0-alpha.8
+    PANBOX_VERSION: v0.1.0-alpha.10
   before_script:
     - apk add --no-cache curl ca-certificates git
   script:
