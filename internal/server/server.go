@@ -291,6 +291,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/credentials", s.protected(s.createCredential))
 	mux.HandleFunc("GET /v1/credentials", s.protected(s.credentials))
 	mux.HandleFunc("DELETE /v1/credentials/{id}", s.protected(s.revokeCredential))
+	mux.HandleFunc("DELETE /v1/credentials/{id}/record", s.protected(s.deleteRevokedCredential))
 	mux.HandleFunc("POST /v1/credentials/{id}/rotate", s.protected(s.rotateCredential))
 	mux.HandleFunc("GET /v1/repos", s.protected(s.repos))
 	mux.HandleFunc("GET /v1/scm-connections", s.protected(s.listConnections))
@@ -660,7 +661,7 @@ func (s *Server) credentials(w http.ResponseWriter, r *http.Request) {
 	if !require(w, r, "tokens:manage") {
 		return
 	}
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,kind,label,scopes::text,COALESCE(repository_id,''),expires_at,revoked_at IS NOT NULL FROM credentials WHERE ($1 OR owner_id=$2) ORDER BY created_at DESC LIMIT 100`, who(r).Admin, who(r).UserID)
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,kind,label,scopes::text,COALESCE(repository_id,''),expires_at,revoked_at IS NOT NULL FROM credentials WHERE ($1 OR owner_id=$2) ORDER BY (revoked_at IS NOT NULL), created_at DESC LIMIT 100`, who(r).Admin, who(r).UserID)
 	if err != nil {
 		fail(w, 500, "database error")
 		return
@@ -692,6 +693,26 @@ func (s *Server) revokeCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r.Context(), who(r).UserID, "credential.revoke", id, map[string]any{})
 	jsonOut(w, 200, map[string]string{"status": "revoked"})
+}
+
+// Delete only a revoked credential record. Audit events retain the key ID and action history.
+func (s *Server) deleteRevokedCredential(w http.ResponseWriter, r *http.Request) {
+	if !who(r).Admin {
+		fail(w, 403, "admin required")
+		return
+	}
+	id := r.PathValue("id")
+	result, err := s.DB.ExecContext(r.Context(), `DELETE FROM credentials WHERE id=$1 AND revoked_at IS NOT NULL`, id)
+	if err != nil {
+		fail(w, 500, "database error")
+		return
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		fail(w, 409, "credential must be revoked before deletion")
+		return
+	}
+	s.audit(r.Context(), who(r).UserID, "credential.delete", id, map[string]any{})
+	jsonOut(w, 200, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) repos(w http.ResponseWriter, r *http.Request) {
