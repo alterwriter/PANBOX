@@ -1,3 +1,9 @@
+## v0.1.0-alpha.10
+
+- Optional host-side Codex CLI worker reviews native VACCIN findings after CI upload using a ChatGPT login and Codex allowance or credits; no OpenAI/Anthropic API key is needed for this route.
+- Local Codex plugin exposes the existing read-only PANBOX MCP bridge for interactive review. Plugin installation alone does not trigger the host worker.
+- Admin settings display the Codex worker heartbeat and keep provider API routes separate. Release assets add worker binaries without changing agent-only downloads.
+
 ## v0.1.0-alpha.8
 
 - CI text output now prints gate status, module results, severity counts, ten prioritized finding locations, and commit-pinned source links when CI metadata is available. GitLab folds the finding list; JSON and SARIF remain machine-readable.

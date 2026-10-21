@@ -231,7 +231,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {type: object, required: [enabled, provider, model, max_findings], properties: {enabled: {type: boolean}, provider: {type: string, enum: [openai, anthropic]}, model: {type: string}, max_findings: {type: integer, minimum: 1, maximum: 10}}}
+            schema: {type: object, required: [enabled, provider, model, max_findings], properties: {enabled: {type: boolean}, provider: {type: string, enum: [codex, openai, anthropic]}, model: {type: string, description: "Optional for codex; uses the host CLI default when empty."}, max_findings: {type: integer, minimum: 1, maximum: 10}}}
       responses: {'200': {description: Settings saved}, '409': {description: Provider key missing}}
   /v1/ai-review/runs:
     get:

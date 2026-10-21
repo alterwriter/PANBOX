@@ -1,35 +1,40 @@
-# Server-side AI review (beta)
+# Optional AI review (beta)
 
-PANBOX keeps VACCIN and ENETRON detection in the CI agent. An optional worker inside `panbox-server` reviews a bounded subset of VACCIN findings **after** the scan bundle and gate have been stored. CI does not run Codex or Claude and never waits for the AI result. The AI result is a suggestion, not an independent vulnerability discovery, false-positive measurement, disposition, recast, or gate input.
+The native CI agent uploads VACCIN/ENETRON findings and receives the gate immediately. AI review then checks up to the Admin-selected number of existing Critical/High/Medium VACCIN findings. It is advisory: it cannot change findings, severity, dispositions, or gates, and it does not discover new vulnerabilities independently.
 
 ```mermaid
 sequenceDiagram
   participant CI as CI agent
-  participant API as PANBOX server
+  participant PANBOX as PANBOX dashboard
   participant DB as PostgreSQL
   participant SCM as GitHub/GitLab
-  participant AI as OpenAI/Anthropic API
-  CI->>API: POST /v1/scans (PANBOX API key)
-  API->>DB: Native findings + gate + queued AI run
-  API-->>CI: Gate + dashboard URL
-  API->>DB: Claim one queued run
-  API->>SCM: Read source snippet at scan commit (connected account)
-  API->>AI: Finding metadata + bounded source snippet
-  AI-->>API: Advisory JSON assessment
-  API->>DB: Assessment + sanitized stage events
-  Note over API,DB: Raw finding and gate remain unchanged
+  participant Worker as Codex host worker
+  participant Codex as Codex plan
+  CI->>PANBOX: Upload native scan
+  PANBOX->>DB: Save findings, gate, queued review
+  PANBOX-->>CI: Gate and dashboard URL
+  Worker->>DB: Claim Codex review (optional)
+  Worker->>SCM: Read bounded source at scan commit
+  Worker->>Codex: Review snippet through ChatGPT-authenticated CLI
+  Worker->>DB: Save advisory assessment and stage events
 ```
 
-## Configure
+## Codex plan route: no provider API key
 
-1. In **Settings & Audit → GitHub & GitLab connections**, connect the repository. The GitHub App needs repository **Metadata: read** for discovery and **Contents: read** for AI source fetch. A GitLab service account token with `read_api` can discover repositories and read repository files through the GitLab API; restrict its project membership. Restrict it to the intended projects; self-hosted HTTPS hosts still require `PANBOX_SCM_ALLOWED_HOSTS`.
-2. Put one provider secret on the **PANBOX server**, in its ignored `.env` or secret manager: `PANBOX_OPENAI_API_KEY` for an OpenAI coding model, or `PANBOX_ANTHROPIC_API_KEY` for a Claude model. `deploy/docker-compose.yml` passes these through to the server container. Restart the server after changing environment secrets. The browser and CI do not receive these keys.
-3. As Admin, open **Settings & Audit → Server-side AI review → Configure and view runs**. Select provider, enter an available model ID for your account, set 1–10 findings per scan (default 3), and enable. The key presence indicator must read configured. Enable only after approving transfer of private source snippets to that provider.
-4. Upload a new scan with the ordinary CI agent. The worker queues automatically. For an older scan, open **Scans → scan detail → Queue AI review on server**. No CI variable or job changes are required.
-5. Open **Configure and view runs** to inspect queued/running/completed/partial/failed status, timestamped process events, source access failures, and each finding's verdict, confidence, explanation, evidence, and suggested fix. Events contain stage/status, not raw source, provider prompts, credentials, or model reasoning traces.
+Run the optional `panbox-ai-worker` **on the trusted PANBOX host**, outside the lightweight dashboard Docker container and outside CI. Install the [Codex CLI](https://learn.chatgpt.com/docs/codex/cli) and sign in with ChatGPT as the dedicated OS user that will run the worker. `codex login status` must say `Logged in using ChatGPT`; the worker checks this on startup and before every review, and rejects API-key login. This route uses that account's Codex plan allowance or applicable credits. It does not use `PANBOX_OPENAI_API_KEY`, `PANBOX_ANTHROPIC_API_KEY`, or a provider API key. A plugin or MCP connection alone does not start automatic reviews.
 
-The worker selects at most the configured number of Critical, High, then Medium VACCIN occurrences with a source path. It reads a small window around each finding line at the exact scanned commit, caps source size, and sends only that window plus finding metadata to the chosen provider over HTTPS. It processes one run at a time per server process. API calls have timeouts and are bounded by the 100-second run deadline; failed reviews are visible as partial/failed runs. A restart can reclaim an interrupted run after its lease ages out. Source permission or provider failures never turn a previously completed scan into a failed CI job.
+1. Connect the repository in **Settings & Audit → GitHub & GitLab connections**. The GitHub App needs `Metadata: read` and `Contents: read`; a GitLab service account needs `read_api` on permitted projects. PANBOX fetches a bounded snippet at the exact scan commit.
+2. Keep PostgreSQL on loopback. The Compose file already maps it to `127.0.0.1:5434` by default. Give the worker its own private environment file with `DATABASE_URL` pointing to that port, the **same** `PANBOX_SCM_ENCRYPTION_KEY` as the dashboard, and `PANBOX_MIGRATIONS_DIR` pointing to this checkout's `migrations` folder. Protect the file for the worker OS user. The worker has database and SCM-read authority; do not run it on a public runner.
+3. Download the `panbox-ai-worker_<os>_<arch>` binary (`.exe` on Windows) from the [same PANBOX release](https://github.com/alterwriter/PANBOX/releases) as the dashboard, or build it with `go build -o panbox-ai-worker ./cmd/panbox-ai-worker`. Keep `codex` on that user's `PATH`. For Debian/Linux, adapt the [systemd unit](../deploy/panbox-ai-worker.service.example), save it as `/etc/systemd/system/panbox-ai-worker.service`, run `sudo systemctl daemon-reload && sudo systemctl enable --now panbox-ai-worker`, and inspect `systemctl status panbox-ai-worker`. Sign in to Codex as `panbox-ai` before starting the service. On Windows/macOS, run the same binary with these environment variables using the native service manager; no PowerShell-specific initialization is required.
+4. As Admin, open **Settings & Audit → Server-side AI review**. Choose **Codex CLI · ChatGPT login**, leave Model ID blank to use the local CLI default, set 1–10 findings per scan (default 3), and enable. The panel shows whether the worker heartbeat is online. Queued reviews wait while it is offline. Existing scans can be queued from scan detail.
+5. Watch **Recent server runs** for queued/running/completed/partial/failed status, timestamped stages, and each verdict, confidence, explanation, evidence, and suggested fix. Stage events omit raw source, prompts, credentials, and model reasoning traces.
 
-AI assessments are stored under their run and finding IDs. They do not rewrite scanner severity, close findings, or revise gates. A human must use normal triage/recast controls with an audited reason. The model can be mistaken; verify the source and rerun native scanning after a fix. PANBOX does not execute model-suggested commands or write to the SCM.
+The worker uses `codex exec --ephemeral --sandbox read-only` with a structured JSON output schema. It passes only finding metadata and a bounded, redacted source window via stdin. The Codex child process receives a minimal environment without PANBOX database, SCM, or provider API secrets. Use a dedicated OS account and dedicated Codex login so its readable files and quota are isolated. The worker processes one review run at a time; each run has a five-minute deadline. An interruption can be reclaimed after six minutes. A failed AI review never turns a completed CI scan into a failed job.
 
-The existing `panbox mcp` stdio bridge is a separate, read-only way for an interactive Codex or Claude session to inspect PANBOX data with a scoped Access key. Connecting PANBOX as an MCP server does **not** trigger the server worker. Automatic review uses the configured model provider API on the PANBOX host.
+## Interactive Codex plugin or MCP
+
+The repo includes a [local Codex plugin](../plugins/panbox/plugin.json) and [marketplace entry](../.agents/plugins/marketplace.json). It wraps the existing **read-only** `panbox mcp` stdio bridge. Install the PANBOX agent binary on the Codex host's `PATH`; set `PANBOX_SERVER` and a scoped `PANBOX_TOKEN` access key (`repos:read`, `scans:read`, `findings:read`) in the Codex process's secret environment, then install the PANBOX plugin from the repo's local marketplace in a local Codex session. You can ask Codex to inspect scans and findings interactively. The plugin does not grant source checkout, write findings, or trigger the automatic worker. Do not put PANBOX tokens into the plugin JSON or Git.
+
+## Provider API route (optional)
+
+The existing dashboard worker can instead use `PANBOX_OPENAI_API_KEY` or `PANBOX_ANTHROPIC_API_KEY` configured on the server and the corresponding model ID selected by Admin. This path is **separately billed by that provider**. Private source snippets leave the PANBOX host for the selected provider when enabled. It uses the same bounded finding selection and advisory storage. To avoid separate provider API usage, leave these keys unset and select the Codex route.

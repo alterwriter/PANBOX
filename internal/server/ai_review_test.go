@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -47,6 +48,27 @@ func TestAISourceFetchAtExactCommit(t *testing.T) {
 				t.Fatalf("content=%q err=%v", content, err)
 			}
 		})
+	}
+}
+
+func TestCodexWorkerDoesNotPassPANBOXSecretsToCLI(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://secret")
+	t.Setenv("PANBOX_SCM_ENCRYPTION_KEY", "secret")
+	t.Setenv("PANBOX_OPENAI_API_KEY", "secret")
+	t.Setenv("CODEX_API_KEY", "secret")
+	for _, item := range codexProcessEnv() {
+		for _, prefix := range []string{"DATABASE_URL=", "PANBOX_SCM_ENCRYPTION_KEY=", "PANBOX_OPENAI_API_KEY=", "CODEX_API_KEY="} {
+			if strings.HasPrefix(strings.ToUpper(item), prefix) {
+				t.Fatalf("secret passed to Codex child: %s", prefix)
+			}
+		}
+	}
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(codexAssessmentSchema), &schema); err != nil {
+		t.Fatal(err)
+	}
+	if schema["additionalProperties"] != false {
+		t.Fatal("Codex assessment schema must reject extra fields")
 	}
 }
 
