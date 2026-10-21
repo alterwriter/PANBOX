@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -23,6 +24,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer s.DB.Close()
+	workerContext, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	go s.RunAIReviewWorker(workerContext)
 	addr := os.Getenv("PANBOX_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"

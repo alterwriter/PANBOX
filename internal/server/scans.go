@@ -261,6 +261,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r.Context(), p.UserID, "scan.ingest", id, map[string]any{"repository_id": in.RepositoryID, "status": status})
+	s.enqueueAIReview(r.Context(), id, in.RepositoryID)
 	jsonOut(w, 201, map[string]any{"id": id, "status": status, "gate_pass": gateValue, "gate_revision": 1, "new": newCount, "baseline_unknown": unknownCount, "dashboard_url": "/scans/" + id})
 }
 

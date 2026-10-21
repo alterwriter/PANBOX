@@ -16,12 +16,17 @@ flowchart LR
     E -->|package name + pinned version over HTTPS| OSV[OSV-compatible advisory API]
     subgraph PRIVATE[Private PANBOX host / Docker Compose]
         API[PANBOX Go API]
+        AI[Optional bounded AI review worker]
         API -->|scan snapshots, findings, gate, RBAC, audit| DB[(PostgreSQL)]
+        API -->|queue after scan commit| AI
+        AI -->|events and advisory assessments| DB
         UI[React dashboard] -->|same-origin API| API
     end
     AGENT -->|GET scan config + API key| API
     AGENT -->|POST normalized scan bundle + CI default branch| API
     API -->|outbound authenticated metadata + repository discovery| SCM
+    AI -->|read snippet at exact commit via connected account| SCM
+    AI -->|HTTPS: bounded finding and snippet| MODEL[OpenAI or Anthropic API]
     BROWSER[Operator browser] -->|loopback or HTTPS reverse proxy| UI
     API -->|pass / fail / incomplete / auth exit outcome| AGENT
 ```
@@ -37,9 +42,9 @@ From `v0.1.0-alpha.8`, the repository API also reports the most recent scan time
 1. Admin connects a GitLab service account or GitHub App, tests it, and imports the accessible repository list on save or explicit Sync. This is outbound HTTPS from the PANBOX host; no public PANBOX address is required. Admin can edit/disable/delete connections, pause scans, edit repositories, remove or restore them, and allow reimport of deliberately removed repositories. Manual enrollment still works for every supported provider. Connected metadata supplies private default branches; without a connection, private or unreachable metadata leaves `ci_pending`, and the first authenticated CI job can supply the branch even while scanning a feature branch. Self-managed Git hosts need their exact HTTPS host in `PANBOX_SCM_ALLOWED_HOSTS`. The API creates a PANBOX project ID; an authorized manager creates an API key with `scans:write`. Owner is display metadata. PANBOX never clones source or auto-enrolls from uploads.
 2. The agent checks selected source patterns with VACCIN and pinned dependency manifests with ENETRON. ENETRON sends **package names and versions** to the configured OSV-compatible advisory API over HTTPS. It does not send source files to that advisory endpoint. The alpha needs that advisory API for ENETRON; `--offline` suppresses dashboard upload only.
 3. Before an online scan, the agent sends `GET /v1/repos/{project-id}/scan-config` with `Authorization: Bearer <api-key>`. The server checks `scans:write`, optional key project scope, key owner membership or Admin, and project active state. Offline scans skip this fetch and are checked when imported.
-4. The agent sends a normalized JSON bundle to `POST /v1/scans` with the same header. It contains repository/branch/commit identity, module status, rule IDs, severities, paths/lines, and short messages. It does not contain raw source snippets. The server checks module permissions again, writes the snapshot, and returns a gate result. A partial or error scan is unverified and does not replace the last successful posture.
+4. The agent sends a normalized JSON bundle to `POST /v1/scans` with the same header. It contains repository/branch/commit identity, module status, rule IDs, severities, paths/lines, and short messages. It does not contain raw source snippets. The server checks module permissions again, writes the snapshot, and returns a gate result. A partial or error scan is unverified and does not replace the last successful posture. When Admin enables AI review, the server also queues a separate run after the scan commit; CI does not wait for it.
 5. The Go API stores scan policies, scans, findings, severity recast history, gate revisions, roles/permissions, key hashes, and audit events in PostgreSQL. Operators configure scan policy in Repositories, recast findings in Findings, and export filtered CSV/JSON/PDF from Reports. A recast updates effective severity on occurrences and recalculates affected gate revisions using each scan's original threshold; raw severity remains intact.
-6. The browser reaches the dashboard on loopback by default. Remote browser access needs a private route or an HTTPS reverse proxy. PostgreSQL should remain private. A local `panbox mcp` stdio process can expose read-only API data to an MCP host using a scoped access key.
+6. The browser reaches the dashboard on loopback by default. Remote browser access needs a private route or an HTTPS reverse proxy. PostgreSQL should remain private. A local `panbox mcp` stdio process can expose read-only API data to an MCP host using a scoped access key. The automatic AI worker is a separate server process path: it reads bounded source snippets through the connected GitHub/GitLab credential, sends them to the selected provider, and stores advisory output and sanitized stage events. See [AI review](ai-review.md) for configuration and limits.
 
 Each uploaded bundle carries its current branch and optionally the SCM default branch from trusted CI metadata. Feature branches appear separately without reenrollment. The enrolled default branch drives Overview posture; when enrollment was `ci_pending`, CI metadata establishes that baseline without assuming the scanned branch is default. Later CI metadata refreshes CI-sourced defaults; a manual override remains authoritative. Runner-to-PANBOX connectivity and API key authorization are checked separately through `/readyz` and `/v1/repos/{id}/scan-config` from the runner.
 

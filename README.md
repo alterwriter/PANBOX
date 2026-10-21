@@ -4,9 +4,9 @@ PANBOX is a lightweight, self-hosted AppSec dashboard and native scanning agent 
 
 This is an **alpha preview**. VACCIN and ENETRON are first-party PANBOX implementations. VACCIN includes native lexical rules for Java, JavaScript/TypeScript, Python/Django templates, PHP, and Go across injection, unsafe execution, XSS, SSRF, path traversal, deserialization, TLS/cookie controls, cryptography, and risky framework/API usage. Known bundled JavaScript is excluded from VACCIN to reduce noise. ENETRON parses resolved or pinned dependencies from npm, pnpm, Yarn, Bun, Python, Go, Maven/Gradle, and Composer inputs, then matches package versions to OSV advisory data over HTTPS. OSV supplies advisory data, not a scanner executable. If a repo has no supported dependency manifest, ENETRON is marked skipped and a completed VACCIN scan can still pass; malformed or unpinned manifests remain unverified. See the [detection coverage guide](docs/detection-coverage.md) for exact rule themes, manifest support, and limitations.
 
-Release `v0.1.0-alpha.7` added 18 Python and 20 JavaScript/TypeScript checks for direct request-controlled operations and unsafe configuration. Release `v0.1.0-alpha.8` adds clearer CI findings output, ten-row dashboard pagination, latest-scan timestamps, and public remediation references. Run `panbox version` in CI to verify the agent release and scanner engine. The checks are lexical and have fixture tests; PANBOX has no measured detection or false-positive rate yet.
+Release `v0.1.0-alpha.7` added 18 Python and 20 JavaScript/TypeScript checks for direct request-controlled operations and unsafe configuration. Release `v0.1.0-alpha.8` adds clearer CI findings output, ten-row dashboard pagination, latest-scan timestamps, and public remediation references. Release `v0.1.0-alpha.9` adds optional server-side AI review of native findings; scanner rules remain at engine `0.1.5`. Run `panbox version` in CI to verify the agent release and scanner engine. The checks are lexical and have fixture tests; PANBOX has no measured detection or false-positive rate yet.
 
-RIDER (secrets), TESLA (IaC), AI, approval workflows, executive report templates, and broad language/dataflow coverage are not implemented. A read-only local MCP bridge is available. See the detailed [English guide](docs/product-guide-en.md) and [Indonesian guide](docs/product-guide-id.md).
+RIDER (secrets), TESLA (IaC), independent AI vulnerability discovery, approval workflows, executive report templates, and broad language/dataflow coverage are not implemented. Optional server-side AI review of native VACCIN findings is available with GitHub/GitLab source access and a configured OpenAI or Anthropic API key; it does not change gates. A read-only local MCP bridge is available separately. See [AI review setup](docs/ai-review.md), the [English guide](docs/product-guide-en.md), and [Indonesian guide](docs/product-guide-id.md).
 
 ## How PANBOX works
 
@@ -54,7 +54,7 @@ The [GitHub Releases page](https://github.com/alterwriter/PANBOX/releases) provi
 On a Linux/macOS CI runner, install only the agent into the job workspace at runtime:
 
 ```bash
-PANBOX_VERSION=v0.1.0-alpha.8
+PANBOX_VERSION=v0.1.0-alpha.9
 curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
 sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 .panbox/bin/panbox version

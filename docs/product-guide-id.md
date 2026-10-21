@@ -10,7 +10,7 @@ Host Git/CI -> runner terlindungi -> agent PANBOX -> API PANBOX privat -> Postgr
                                        | ENETRON: paket -> OSV       +-> UI React
 ```
 
-**Hasil:** CI menerima status pass, gate gagal, scan tidak lengkap, atau akses ditolak; operator melihat snapshot repo dan branch. File source tetap di runner. ENETRON mengirim nama dan versi paket ke API advisory kompatibel OSV. Agent mengunggah temuan ternormalisasi dengan API key PANBOX, tanpa potongan source mentah. Lihat [diagram arsitektur dan jaringan](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.8/docs/architecture.md).
+**Hasil:** CI menerima status pass, gate gagal, scan tidak lengkap, atau akses ditolak; operator melihat snapshot repo dan branch. Bundle CI tidak memuat source mentah; review AI opsional di server mengambil potongan terbatas secara terpisah lewat koneksi SCM. ENETRON mengirim nama dan versi paket ke API advisory kompatibel OSV. Agent mengunggah temuan ternormalisasi dengan API key PANBOX, tanpa potongan source mentah. Lihat [diagram arsitektur dan jaringan](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.9/docs/architecture.md).
 
 ### Alasan tim memilih PANBOX
 
@@ -119,7 +119,7 @@ Batasi kredensial SCM pada repo yang memang ingin ditemukan. Jika tes akses gaga
 | `PANBOX_SERVER` | Variable | URL dashboard yang bisa dijangkau runner, idealnya HTTPS. |
 | `PANBOX_REPOSITORY_ID` | Variable | ID internal PANBOX dari halaman repository; bukan project ID SCM. |
 | `PANBOX_API_KEY` | Masked/protected secret | API key PANBOX berscope `scans:write`; tidak perlu token repository. |
-| `PANBOX_VERSION` | Variable | Tag agent yang dipin, misalnya `v0.1.0-alpha.8`. |
+| `PANBOX_VERSION` | Variable | Tag agent yang dipin, misalnya `v0.1.0-alpha.9`. |
 | `PANBOX_MODULES` | Variable opsional | Modul yang dijalankan; contoh GitLab default `vaccin,enetron`. Gunakan `vaccin` bila memang hanya ingin menjalankan SAST. |
 | `PANBOX_DEFAULT_BRANCH` | Opsional | Isi jika CI tidak menyediakan metadata default branch. |
 
@@ -152,17 +152,17 @@ curl -fsS -H "Authorization: Bearer $PANBOX_API_KEY" \
 
 Pola JSON di atas mewakili regex `unsafeCall\(`. ID dimulai `custom.`; ekstensi yang didukung `.py`, `.pyw`, `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs`, `.mts`, `.cts`, `.go`, `.java`, `.jsp`, `.php`, dan `.phtml`. Batas: 64 rule, 256 karakter per pola, file 64 KiB. Regex dapat lintas baris setelah penyaringan komentar/string secara leksikal; ini bukan analisis AST atau taint. Review file rule seperti perubahan kode lain dan uji di repo representatif. Lihat [matriks coverage deteksi alpha](detection-coverage.md) untuk keluarga rule bawaan dan batas manifest SCA.
 
-**Setiap job Linux/macOS:** ambil installer versi tetap dari [release PANBOX v0.1.0-alpha.8](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.8). Installer memilih OS/CPU, mengunduh hanya binary agent, memeriksa [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.8/SHA256SUMS), lalu memasang di workspace job tanpa sudo:
+**Setiap job Linux/macOS:** ambil installer versi tetap dari [release PANBOX v0.1.0-alpha.9](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.9). Installer memilih OS/CPU, mengunduh hanya binary agent, memeriksa [SHA256SUMS](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.9/SHA256SUMS), lalu memasang di workspace job tanpa sudo:
 
 ```bash
-PANBOX_VERSION=v0.1.0-alpha.8
+PANBOX_VERSION=v0.1.0-alpha.9
 curl -fsSL "https://github.com/alterwriter/PANBOX/releases/download/${PANBOX_VERSION}/install-agent.sh" -o install-panbox-agent.sh
 sh install-panbox-agent.sh "$PANBOX_VERSION" .panbox/bin
 .panbox/bin/panbox version
 .panbox/bin/panbox go --server "$PANBOX_SERVER" --repo "$PANBOX_REPOSITORY_ID" --path .
 ```
 
-**Hasil yang diharapkan:** exit `0` scan lengkap/pass; `1` gate gagal; `2` scan/transport/konfigurasi tidak lengkap; `3` autentikasi atau izin ditolak. Salin contoh [GitHub Actions](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.8/deploy/github-actions-local-runner.yml) atau [GitLab CI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.8/deploy/gitlab-ci-local-runner.yml). Untuk runner Windows, unduh [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.8/install-agent.ps1), lalu jalankan `./install-agent.ps1 -Version v0.1.0-alpha.8`; hasilnya `./.panbox/bin/panbox.exe` setelah verifikasi checksum. [Binary agent langsung](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.8) juga tersedia.
+**Hasil yang diharapkan:** exit `0` scan lengkap/pass; `1` gate gagal; `2` scan/transport/konfigurasi tidak lengkap; `3` autentikasi atau izin ditolak. Salin contoh [GitHub Actions](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.9/deploy/github-actions-local-runner.yml) atau [GitLab CI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.9/deploy/gitlab-ci-local-runner.yml). Untuk runner Windows, unduh [install-agent.ps1](https://github.com/alterwriter/PANBOX/releases/download/v0.1.0-alpha.9/install-agent.ps1), lalu jalankan `./install-agent.ps1 -Version v0.1.0-alpha.9`; hasilnya `./.panbox/bin/panbox.exe` setelah verifikasi checksum. [Binary agent langsung](https://github.com/alterwriter/PANBOX/releases/tag/v0.1.0-alpha.9) juga tersedia.
 
 **Hemat pemakaian CI:** tambahkan satu pemanggilan PANBOX ke job build terlindungi yang sudah ada setelah checkout; jangan membuat job scan/analisis kedua jika menit shared runner terbatas. PANBOX membaca source dan manifest dependensi dari checkout, bukan image container hasil build. Jika tidak ada manifest yang didukung, ENETRON menjadi `skipped` dan VACCIN tetap bisa selesai. Gunakan `--modules vaccin` hanya jika sengaja menjalankan SAST saja.
 
@@ -172,9 +172,9 @@ VACCIN menyediakan rule leksikal buatan PANBOX untuk lima keluarga bahasa; lihat
 
 ## 7. Hubungkan SCM publik ke PANBOX privat
 
-- **Runner lokal terlindungi (disarankan):** polling SCM apa pun lewat HTTPS keluar, lalu mengirim ke PANBOX di LAN. Tidak perlu port PANBOX publik; gate sinkron. Contoh [GitHub](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.8/deploy/github-actions-local-runner.yml) dan [GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.8/deploy/gitlab-ci-local-runner.yml).
-- **SSH relay:** PANBOX membuka reverse tunnel keluar ke relay yang terjangkau; shared runner membuka forward tunnel. PANBOX tidak menerima port internet masuk; gate sinkron. Pin host key dan batasi identity. Lihat [contoh relay GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.8/deploy/gitlab-ci-ssh-relay.yml).
-- **Impor artifact:** CI menulis `panbox-results.json`; host privat mengambil dan mengimpornya belakangan. Tanpa jalur masuk/relay; gate belakangan tidak dapat memblokir job CI itu. [Contoh artifact GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.8/deploy/gitlab-ci-pull-artifact.yml) dan `panbox relay-pull` mengotomasi GitLab; SCM lain memerlukan langkah unduh artifact sebelum impor generik `panbox go --bundle`.
+- **Runner lokal terlindungi (disarankan):** polling SCM apa pun lewat HTTPS keluar, lalu mengirim ke PANBOX di LAN. Tidak perlu port PANBOX publik; gate sinkron. Contoh [GitHub](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.9/deploy/github-actions-local-runner.yml) dan [GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.9/deploy/gitlab-ci-local-runner.yml).
+- **SSH relay:** PANBOX membuka reverse tunnel keluar ke relay yang terjangkau; shared runner membuka forward tunnel. PANBOX tidak menerima port internet masuk; gate sinkron. Pin host key dan batasi identity. Lihat [contoh relay GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.9/deploy/gitlab-ci-ssh-relay.yml).
+- **Impor artifact:** CI menulis `panbox-results.json`; host privat mengambil dan mengimpornya belakangan. Tanpa jalur masuk/relay; gate belakangan tidak dapat memblokir job CI itu. [Contoh artifact GitLab](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.9/deploy/gitlab-ci-pull-artifact.yml) dan `panbox relay-pull` mengotomasi GitLab; SCM lain memerlukan langkah unduh artifact sebelum impor generik `panbox go --bundle`.
 
 **Cek:** dari runner sinkron, `curl -fsS "$PANBOX_SERVER/readyz"` harus berhasil. Repo publik tidak otomatis membuat artifact CI publik.
 
@@ -194,7 +194,7 @@ VACCIN menyediakan rule leksikal buatan PANBOX untuk lima keluarga bahasa; lihat
 curl -H "Authorization: Bearer $PANBOX_ACCESS_KEY" "$PANBOX_SERVER/v1/repos"
 ```
 
-Browser memakai password, session cookie HttpOnly, dan CSRF token. [Kontrak OpenAPI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.8/api/openapi.yaml) memuat endpoint pilot. Gunakan **Rotate** untuk membuat secret pengganti dan mencabut key lama secara atomik; perbarui secret CI sebelum job berikutnya.
+Browser memakai password, session cookie HttpOnly, dan CSRF token. [Kontrak OpenAPI](https://github.com/alterwriter/PANBOX/blob/v0.1.0-alpha.9/api/openapi.yaml) memuat endpoint pilot. Gunakan **Rotate** untuk membuat secret pengganti dan mencabut key lama secara atomik; perbarui secret CI sebelum job berikutnya.
 
 ## 10. Periksa dan kontrol scan di dashboard
 
@@ -240,4 +240,22 @@ Host Debian 2 GB adalah **target untuk divalidasi**, bukan jaminan. Fixture keci
 
 Yang tersedia: server/UI, pemeriksaan source native VACCIN, pencocokan dependensi tetap native ENETRON dengan data OSV, snapshot repo/branch, gate, RBAC, key berscope, audit, ekspor PDF/CSV/JSON terfilter, serta contoh jalur koneksi di atas. Validasi runner nyata, OSV/mirror, beban Debian, backup/restore, TLS, dan rotasi key di lingkungan target.
 
-Cakupan masih sempit. RIDER secrets, TESLA IaC, alur persetujuan, template laporan PDF eksekutif, AI Security, OIDC, dan rate limiting API masih roadmap. Panduan online ini menjelaskan pilot; laporan kerentanan PANBOX diekspor terpisah dari dashboard.
+Cakupan masih sempit. RIDER secrets, TESLA IaC, alur persetujuan, template laporan PDF eksekutif, penemuan kerentanan mandiri oleh AI, OIDC, dan rate limiting API masih roadmap. Panduan online ini menjelaskan pilot; laporan kerentanan PANBOX diekspor terpisah dari dashboard.
+
+## 14. Tinjau temuan dengan AI di server PANBOX
+
+**Alur:** CI menjalankan agent native VACCIN/ENETRON lalu mengunggah scan biasa. PANBOX langsung mengembalikan hasil gate. Jika Admin mengaktifkan review AI, worker di server mengambil potongan source pada commit scan yang tepat melalui koneksi GitHub/GitLab, memanggil model OpenAI atau Anthropic, lalu menyimpan penilaian dan log tahapan terpisah di PostgreSQL. CI tidak menjalankan AI, memasang CLI AI, atau menunggu proses ini.
+
+**Variabel server:**
+
+| Variabel | Lokasi | Fungsi |
+|---|---|---|
+| `PANBOX_OPENAI_API_KEY` | `.env` server PANBOX/secret manager | API key model coding OpenAI; hanya untuk pilihan OpenAI. |
+| `PANBOX_ANTHROPIC_API_KEY` | `.env` server PANBOX/secret manager | API key Claude; hanya untuk pilihan Anthropic. |
+| `PANBOX_SCM_ENCRYPTION_KEY` | Server PANBOX | Mengenkripsi kredensial koneksi GitHub/GitLab yang juga dipakai untuk discovery repo. |
+
+**Setup:** beri GitHub App izin `Metadata: read` dan `Contents: read`, atau beri service account GitLab `read_api` pada proyek yang diizinkan (scope ini juga bisa membaca file melalui API GitLab). Restart Docker Compose setelah menambah secret provider. Buka **Settings & Audit → Server-side AI review → Configure and view runs**, pilih provider dan ID model yang tersedia, atur 1–10 temuan per scan (default 3), lalu aktifkan. PANBOX mengirim potongan source privat ke provider pilihan hanya setelah Admin mengaktifkan opsi ini. Untuk scan lama, buka **Scans → detail scan → Queue AI review on server**.
+
+**Pantau:** panel Admin menampilkan status queued/running/completed/partial/failed, log tahapan, dan verdict, confidence, penjelasan, bukti, serta saran perbaikan tiap temuan. Kegagalan izin baca source juga tampak di sana. Yang dipilih hanya temuan VACCIN Critical/High/Medium dengan path source, dimulai dari severity tertinggi. Saran AI tidak menutup temuan, mengubah severity, atau mengubah gate secara otomatis; lakukan triase/recast manual dengan alasan yang diaudit. Ini review atas temuan scanner, bukan penemuan AI SAST mandiri atau angka false positive terukur. Baca [desain dan batas review AI](ai-review.md).
+
+**MCP Codex/Claude:** integrasi stdio `panbox mcp` tetap hanya-baca untuk penggunaan interaktif dengan Access key berscope. MCP tidak memicu review di server. Jalur otomatis memakai API provider dari server PANBOX tanpa variabel CI tambahan.

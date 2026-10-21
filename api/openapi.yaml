@@ -221,6 +221,32 @@ paths:
     get:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       responses: {'200': {description: Finding detail rows for this scan, including source path and line, commit-pinned source link when available, rule-relevant public reference URL, and remediation guidance}}
+  /v1/ai-review/settings:
+    get:
+      description: Admin browser session only. Returns enabled, provider, model, per-scan finding cap, and provider-key presence flags; never returns secrets.
+      responses: {'200': {description: AI review configuration}}
+    put:
+      description: Admin browser session and CSRF required. Enabling requires a provider API key configured on the PANBOX server. Private source snippets are sent to the chosen provider only when enabled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [enabled, provider, model, max_findings], properties: {enabled: {type: boolean}, provider: {type: string, enum: [openai, anthropic]}, model: {type: string}, max_findings: {type: integer, minimum: 1, maximum: 10}}}
+      responses: {'200': {description: Settings saved}, '409': {description: Provider key missing}}
+  /v1/ai-review/runs:
+    get:
+      description: Admin browser session only. Last 50 advisory runs. AI review is asynchronous and never changes the native scan gate.
+      responses: {'200': {description: Run metadata}}
+  /v1/ai-review/runs/{id}:
+    get:
+      description: Admin browser session only. Returns sanitized process events and advisory per-finding assessments; no raw source, prompts, credentials, or model reasoning traces.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Run status, events, and assessments}}
+  /v1/scans/{id}/ai-review:
+    post:
+      description: Admin browser session and CSRF required. Queues an AI review for an existing scan when enabled.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'202': {description: Review queued}, '409': {description: AI review disabled}}
   /v1/findings:
     get:
       parameters:
