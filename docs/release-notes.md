@@ -1,3 +1,9 @@
+## v0.1.0-alpha.11
+
+- Admin can remove revoked credential records; active keys require revocation first. The UI hides revoked keys by default and keeps their audit history after deletion.
+- Dashboard MCP setup now walks through host-side ChatGPT sign-in, scoped PANBOX Access key, local stdio configuration, and verification. The AI review panel clarifies that its online state is a worker heartbeat.
+- Scanner engine and CI agent behavior are unchanged from alpha.10.
+
 ## v0.1.0-alpha.10
 
 - Optional host-side Codex CLI worker reviews native VACCIN findings after CI upload using a ChatGPT login and Codex allowance or credits; no OpenAI/Anthropic API key is needed for this route.

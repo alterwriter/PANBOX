@@ -271,12 +271,18 @@ func TestAdminCanIssueAndRevokeScopedKey(t *testing.T) {
 	if got := call("POST", "/v1/credentials", `{"kind":"access","label":"bad-write","scopes":["scans:write"],"expires_hours":1}`, cookie, auth.CSRF, ""); got.Code != 400 {
 		t.Fatalf("access key accepted write scope: %d", got.Code)
 	}
+	if got := call("DELETE", "/v1/credentials/"+key.ID+"/record", "", cookie, auth.CSRF, ""); got.Code != 409 {
+		t.Fatalf("active key deleted: %d", got.Code)
+	}
 	revoke := call("DELETE", "/v1/credentials/"+key.ID, "", cookie, auth.CSRF, "")
 	if revoke.Code != 200 {
 		t.Fatalf("revoke %d", revoke.Code)
 	}
 	if got := call("GET", "/v1/scans", "", nil, "", key.Secret); got.Code != 401 {
 		t.Fatalf("revoked key accepted %d", got.Code)
+	}
+	if got := call("DELETE", "/v1/credentials/"+key.ID+"/record", "", cookie, auth.CSRF, ""); got.Code != 200 {
+		t.Fatalf("revoked key deletion failed: %d %s", got.Code, got.Body.String())
 	}
 	unique := core.ID()
 	enroll := call("POST", "/v1/repos", `{"name":"membership-test","provider":"gitlab","provider_project_id":"demo/`+unique+`","default_branch":"main"}`, cookie, auth.CSRF, "")

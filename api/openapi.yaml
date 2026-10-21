@@ -117,6 +117,11 @@ paths:
     delete:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       responses: {'200': {description: Credential revoked}}
+  /v1/credentials/{id}/record:
+    delete:
+      description: Admin browser session only. Permanently remove a previously revoked credential record; audit events retain its ID and action history. Active keys cannot be deleted.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Revoked credential record deleted}, '403': {description: Admin required}, '409': {description: Key is active or absent}}
   /v1/credentials/{id}/rotate:
     post:
       description: Key owner or Admin creates a replacement and revokes the prior API or access key. Plaintext is shown once; hashes cannot be copied back.
