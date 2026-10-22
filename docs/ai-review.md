@@ -35,12 +35,15 @@ PANBOX Admin cannot initiate the host CLI login through an ordinary ChatGPT webs
 
 This example assumes the dashboard checkout is `/opt/panbox` and its Compose PostgreSQL is published only on `127.0.0.1:5434`. Run these commands **on that host**, not in a CI job or on a separate Codex workstation. Replace the checkout path and port if yours differ. The interactive MCP plugin is not used by this worker.
 
-1. Install Codex CLI so `command -v codex` resolves to a binary accessible to the service user (normally `/usr/local/bin` or `/usr/bin`). Create the dedicated user and download the release worker with a checksum check:
+1. Create the dedicated user, install Codex CLI for that user, and download the release worker with a checksum check. The [official standalone installer](https://learn.chatgpt.com/docs/codex/cli) places Codex in that user's private bin directory; the service unit includes it on `PATH`. Run the installer from a directory the user can enter:
 
    ```bash
    cd /opt/panbox
    sudo apt-get update && sudo apt-get install -y curl ca-certificates
    sudo useradd --system --create-home --home-dir /var/lib/panbox-ai --shell /usr/sbin/nologin panbox-ai 2>/dev/null || id panbox-ai
+   curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/install-codex.sh
+   (cd /tmp && sudo -u panbox-ai env HOME=/var/lib/panbox-ai CODEX_HOME=/var/lib/panbox-ai/.codex CODEX_INSTALL_DIR=/var/lib/panbox-ai/.local/bin CODEX_NON_INTERACTIVE=1 sh /tmp/install-codex.sh)
+   sudo -u panbox-ai env HOME=/var/lib/panbox-ai CODEX_HOME=/var/lib/panbox-ai/.codex /var/lib/panbox-ai/.local/bin/codex --version
    (
      version=v0.1.0-alpha.12
      case "$(uname -m)" in x86_64) arch=amd64;; aarch64) arch=arm64;; *) echo 'Unsupported CPU' >&2; exit 2;; esac
@@ -68,8 +71,8 @@ This example assumes the dashboard checkout is `/opt/panbox` and its Compose Pos
 3. Sign in **as the worker user**, then install/start the systemd service. The browser on your own computer can complete the URL/code challenge printed by Codex on the host. This login is independent of `/mcp` on your workstation:
 
    ```bash
-   sudo -H -u panbox-ai codex login --device-auth
-   sudo -H -u panbox-ai codex login status
+   sudo -H -u panbox-ai /var/lib/panbox-ai/.local/bin/codex login --device-auth
+   sudo -H -u panbox-ai /var/lib/panbox-ai/.local/bin/codex login status
    sudo cp deploy/panbox-ai-worker.service.example /etc/systemd/system/panbox-ai-worker.service
    sudo systemctl daemon-reload
    sudo systemctl enable --now panbox-ai-worker
@@ -77,7 +80,7 @@ This example assumes the dashboard checkout is `/opt/panbox` and its Compose Pos
    journalctl -u panbox-ai-worker -n 50 --no-pager
    ```
 
-4. In **Settings & Audit → Server-side AI review**, expect **worker online** and **ChatGPT login ready**. Enable Codex review, then upload a new scan or queue an existing scan from its detail panel. If the worker is offline, check `journalctl` for database connection, encryption key, migration path, or Codex executable errors. If it is online but login is required, repeat the two `sudo -H -u panbox-ai codex login ...` commands. If a run fails after starting, inspect its Admin process events and verify the GitHub App has `Contents: read` or the GitLab connection can read the scanned commit.
+4. In **Settings & Audit → Server-side AI review**, expect **worker online** and **ChatGPT login ready**. Enable Codex review, then upload a new scan or queue an existing scan from its detail panel. If the worker is offline, check `journalctl` for database connection, encryption key, migration path, or Codex executable errors. If it is online but login is required, repeat the two `sudo -H -u panbox-ai /var/lib/panbox-ai/.local/bin/codex login ...` commands. If a run fails after starting, inspect its Admin process events and verify the GitHub App has `Contents: read` or the GitLab connection can read the scanned commit.
 
 The worker uses the dashboard database directly; it does **not** use `PANBOX_SERVER`, `PANBOX_TOKEN`, the CI API key, or the local MCP plugin.
 
