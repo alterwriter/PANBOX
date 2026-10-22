@@ -30,6 +30,13 @@
 .remediation-steps{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
 .remediation-steps span{display:inline-flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--line);border-radius:999px;padding:6px 9px;font-size:10px;color:var(--muted)}
 .remediation-steps svg{color:var(--green)}
+.ai-review-card{padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--surface2)}
+.ai-review-card .finding-section-heading{align-items:flex-start}
+.ai-review-card .status-badge{white-space:nowrap}
+.ai-review-card p{font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.ai-review-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px}
+.ai-review-meta b{text-transform:capitalize;color:var(--purple)}
+.ai-review-meta span{color:var(--muted)}
 .finding-timeline{display:grid;gap:0;max-height:180px;overflow:auto}
 .finding-timeline>div{display:grid;grid-template-columns:8px 80px 1fr auto;gap:11px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:11px}
 .finding-timeline>div:last-child{border-bottom:0}
