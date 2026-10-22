@@ -31,6 +31,59 @@ PANBOX Admin cannot initiate the host CLI login through an ordinary ChatGPT webs
 4. As Admin, open **Settings & Audit → Server-side AI review**. Confirm both **worker online** and **ChatGPT login ready**. Choose **Codex CLI · ChatGPT login**, leave Model ID blank to use the local CLI default, set 1–10 findings per scan (default 3), and enable. Queued reviews wait while the worker is offline or login is required. Existing scans can be queued from scan detail.
 5. Watch **Recent server runs** for queued/running/completed/partial/failed status, timestamped stages, and each verdict, confidence, explanation, evidence, and suggested fix. Open a finding to see its current AI evaluation state and advisory. Stage events omit raw source, prompts, credentials, and model reasoning traces.
 
+### Run the worker on a Debian Docker host
+
+This example assumes the dashboard checkout is `/opt/panbox` and its Compose PostgreSQL is published only on `127.0.0.1:5434`. Run these commands **on that host**, not in a CI job or on a separate Codex workstation. Replace the checkout path and port if yours differ. The interactive MCP plugin is not used by this worker.
+
+1. Create the dedicated user, install Codex CLI for that user, and download the release worker with a checksum check. The [official standalone installer](https://learn.chatgpt.com/docs/codex/cli) places Codex in that user's private bin directory; the service unit includes it on `PATH`. Run the installer from a directory the user can enter:
+
+   ```bash
+   cd /opt/panbox
+   sudo apt-get update && sudo apt-get install -y curl ca-certificates
+   sudo useradd --system --create-home --home-dir /var/lib/panbox-ai --shell /usr/sbin/nologin panbox-ai 2>/dev/null || id panbox-ai
+   curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/install-codex.sh
+   (cd /tmp && sudo -u panbox-ai env HOME=/var/lib/panbox-ai CODEX_HOME=/var/lib/panbox-ai/.codex CODEX_INSTALL_DIR=/var/lib/panbox-ai/.local/bin CODEX_NON_INTERACTIVE=1 sh /tmp/install-codex.sh)
+   sudo -u panbox-ai env HOME=/var/lib/panbox-ai CODEX_HOME=/var/lib/panbox-ai/.codex /var/lib/panbox-ai/.local/bin/codex --version
+   (
+     version=v0.1.0-alpha.12
+     case "$(uname -m)" in x86_64) arch=amd64;; aarch64) arch=arm64;; *) echo 'Unsupported CPU' >&2; exit 2;; esac
+     asset="panbox-ai-worker_linux_${arch}"
+     base="https://github.com/alterwriter/PANBOX/releases/download/${version}"
+     tmp=$(mktemp -d)
+     trap 'rm -rf "$tmp"' EXIT
+     curl -fL "$base/$asset" -o "$tmp/$asset"
+     curl -fL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS"
+     (cd "$tmp" && awk -v name="$asset" '$2 == name {print}' SHA256SUMS | sha256sum -c -)
+     sudo install -m 0755 "$tmp/$asset" /opt/panbox/panbox-ai-worker
+   )
+   ```
+
+2. Make the private worker environment from [the example](../deploy/ai-worker.env.example). Set `DATABASE_URL` with the dashboard's PostgreSQL password (URL-encode special characters), `PANBOX_SCM_ENCRYPTION_KEY` to the **same** key used by the dashboard, and `PANBOX_MIGRATIONS_DIR=/opt/panbox/migrations`. Protect the file and check the worker can read migrations. Do not paste either secret into a screenshot or issue:
+
+   ```bash
+   sudo install -d -m 0750 -o root -g panbox-ai /etc/panbox
+   sudoedit /etc/panbox/ai-worker.env
+   sudo chown root:panbox-ai /etc/panbox/ai-worker.env
+   sudo chmod 0640 /etc/panbox/ai-worker.env
+   sudo -H -u panbox-ai test -r /opt/panbox/migrations/009_ai_review_status.sql
+   ```
+
+3. Sign in **as the worker user**, then install/start the systemd service. The browser on your own computer can complete the URL/code challenge printed by Codex on the host. This login is independent of `/mcp` on your workstation:
+
+   ```bash
+   sudo -H -u panbox-ai /var/lib/panbox-ai/.local/bin/codex login --device-auth
+   sudo -H -u panbox-ai /var/lib/panbox-ai/.local/bin/codex login status
+   sudo cp deploy/panbox-ai-worker.service.example /etc/systemd/system/panbox-ai-worker.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now panbox-ai-worker
+   systemctl status panbox-ai-worker --no-pager
+   journalctl -u panbox-ai-worker -n 50 --no-pager
+   ```
+
+4. In **Settings & Audit → Server-side AI review**, expect **worker online** and **ChatGPT login ready**. Enable Codex review, then upload a new scan or queue an existing scan from its detail panel. If the worker is offline, check `journalctl` for database connection, encryption key, migration path, or Codex executable errors. If it is online but login is required, repeat the two `sudo -H -u panbox-ai /var/lib/panbox-ai/.local/bin/codex login ...` commands. If a run fails after starting, inspect its Admin process events and verify the GitHub App has `Contents: read` or the GitLab connection can read the scanned commit.
+
+The worker uses the dashboard database directly; it does **not** use `PANBOX_SERVER`, `PANBOX_TOKEN`, the CI API key, or the local MCP plugin.
+
 | Finding AI state | Meaning |
 |---|---|
 | Not requested | No review was queued for its latest complete scan. |
@@ -47,7 +100,11 @@ The worker uses `codex exec --ephemeral --sandbox read-only` with a structured J
 
 ## Interactive Codex plugin or MCP
 
-The repo includes a [local Codex plugin](../plugins/panbox/plugin.json) and [marketplace entry](../.agents/plugins/marketplace.json). It wraps the **read-only** `panbox mcp` stdio bridge. Install the PANBOX agent binary on the Codex host's `PATH`; set `PANBOX_SERVER` and a scoped `PANBOX_TOKEN` access key (`repos:read`, `scans:read`, `findings:read`) in the Codex process's protected environment. Run `codex plugin marketplace add alterwriter/PANBOX --ref v0.1.0-alpha.12`, start Codex, enter `/plugins`, choose **PANBOX Local**, install **PANBOX**, then start a new session and enter `/mcp`. Alternatively configure the same STDIO command in ChatGPT desktop **Settings → MCP servers → Add server**. ChatGPT web does not load a local Codex config or STDIO process. The plugin does not grant source checkout, write findings, or trigger the automatic worker. Do not put PANBOX tokens into plugin JSON or Git.
+Follow the [tested Codex MCP setup and failure recovery](mcp-codex.md) for the full Linux/macOS flow, including checksum-verified agent installation, a repository-scoped Access key, owner-only secret storage, launcher, direct tool call, and Codex restart. The MCP bridge has been validated with Codex CLI on Debian; other MCP clients are not yet validated in this pilot.
+
+The repo includes a [local Codex plugin](../plugins/panbox/plugin.json) and [marketplace entry](../.agents/plugins/marketplace.json). It wraps the **read-only** `panbox mcp` stdio bridge. Install the PANBOX agent binary on the Codex host's `PATH`; set `PANBOX_SERVER` and a scoped `PANBOX_TOKEN` access key (`repos:read`, `scans:read`, `findings:read`) in the Codex process's protected environment. Run `codex plugin marketplace add alterwriter/PANBOX --ref v0.1.0-alpha.12`, start Codex, enter `/plugins`, choose **PANBOX Local**, install **PANBOX**, then start a new session and enter `/mcp`. Other local stdio MCP clients have not been validated with PANBOX in this pilot. ChatGPT web does not load a local Codex config or STDIO process. The plugin does not grant source checkout, write findings, or trigger the automatic worker. Do not put PANBOX tokens into plugin JSON or Git.
+
+**If `/mcp` says `panbox: failed (0 tools)`:** the plugin package does not contain the agent executable or your PANBOX Access key. On the same machine that starts Codex, check `panbox version`, `PANBOX_SERVER` (a reachable HTTPS URL, or loopback HTTP), and whether `PANBOX_TOKEN` is set. On Windows PowerShell, `Get-Command panbox` must find `panbox.exe`; `Test-Path Env:PANBOX_SERVER` and `Test-Path Env:PANBOX_TOKEN` should both be true. Run the [checksum-verifying Windows installer](../scripts/install-agent.ps1) with `-Version v0.1.0-alpha.12` to a directory on Codex's `PATH`, or launch Codex from a shell that adds the install directory to `PATH`. Create a **read-only Access key** in PANBOX Settings, with `repos:read`, `scans:read`, and `findings:read`; this is not the CI `scans:write` key. Test `curl -fsS "$PANBOX_SERVER/readyz"` and an authenticated `GET /v1/repos` before restarting Codex. Use `/mcp verbose` for the startup error. A missing command or missing environment causes the bridge to exit before it advertises its four tools. Never share the key or include it in logs.
 
 ## Provider API route (optional)
 
