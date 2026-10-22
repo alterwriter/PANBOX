@@ -228,10 +228,10 @@ paths:
       responses: {'200': {description: Finding detail rows for this scan, including source path and line, commit-pinned source link when available, rule-relevant public reference URL, and remediation guidance}}
   /v1/ai-review/settings:
     get:
-      description: Admin browser session only. Returns enabled, provider, model, per-scan finding cap, and provider-key presence flags; never returns secrets.
+      description: Admin browser session only. Returns enabled, provider, model, per-scan finding cap, provider-key presence flags, codex_worker_online heartbeat, and codex_auth_status (ready, login_required, or worker_offline); never returns secrets.
       responses: {'200': {description: AI review configuration}}
     put:
-      description: Admin browser session and CSRF required. Enabling requires a provider API key configured on the PANBOX server. Private source snippets are sent to the chosen provider only when enabled.
+      description: Admin browser session and CSRF required. OpenAI/Anthropic routes require a configured provider API key; the Codex route uses the separate ChatGPT-authenticated host worker and no provider API key. Private source snippets are sent only to the chosen route when enabled.
       requestBody:
         required: true
         content:
@@ -259,11 +259,11 @@ paths:
         - {name: branch, in: query, schema: {type: string}}
         - {name: module, in: query, schema: {type: string}}
         - {name: severity, in: query, schema: {type: string}}
-      responses: {'200': {description: Up to 1000 authorized branch finding rows with path and line, public guidance URL, and open, triaged, or resolved lifecycle status}}
+      responses: {'200': {description: Up to 1000 authorized branch finding rows with path and line, public guidance URL, lifecycle status, AIState, and AIVerdict from the latest scan AI run}}
   /v1/findings/{id}:
     get:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: branch, in: query, required: true, schema: {type: string}}]
-      responses: {'200': {description: Finding detail with rule-specific or general remediation guidance, commit-pinned source URL when available, curated OWASP/Django or OSV reference_url, and last 100 eligible complete scans. Guidance is advisory and does not establish exploitability.}}
+      responses: {'200': {description: Finding detail with guidance, source and reference URLs, last 100 eligible complete scans, and ai_review state/run/verdict/confidence/evidence/remediation for the latest branch scan. AI advice is advisory and never changes the native gate.}}
   /v1/findings/{id}/disposition:
     post:
       description: Requires findings:recast. Sets global triage state, records reason, and revises affected gates.

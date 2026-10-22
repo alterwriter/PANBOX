@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"panbox/internal/core"
@@ -43,6 +44,58 @@ type aiAssessment struct {
 	Evidence    string `json:"evidence"`
 }
 
+type aiFindingReview struct {
+	State       string     `json:"state"`
+	RunID       string     `json:"run_id,omitempty"`
+	RunStatus   string     `json:"run_status,omitempty"`
+	Provider    string     `json:"provider,omitempty"`
+	ErrorCode   string     `json:"error_code,omitempty"`
+	Verdict     string     `json:"verdict,omitempty"`
+	Confidence  string     `json:"confidence,omitempty"`
+	Explanation string     `json:"explanation,omitempty"`
+	Remediation string     `json:"remediation,omitempty"`
+	Evidence    string     `json:"evidence,omitempty"`
+	At          *time.Time `json:"at,omitempty"`
+}
+
+func (s *Server) findingAIReview(ctx context.Context, scanID, findingID, module, severity, path, disposition string, line int, present bool) (aiFindingReview, error) {
+	if !present {
+		return aiFindingReview{State: "resolved"}, nil
+	}
+	eligible := module == "vaccin" && (severity == "critical" || severity == "high" || severity == "medium") && path != "" && line > 0 && disposition == "open"
+	var review aiFindingReview
+	var created time.Time
+	err := s.DB.QueryRowContext(ctx, `SELECT r.id,r.provider,r.status,r.error_code,r.created_at,
+    COALESCE(a.verdict,''),COALESCE(a.confidence,''),COALESCE(a.explanation,''),COALESCE(a.remediation,''),COALESCE(a.evidence,'')
+    FROM ai_review_runs r LEFT JOIN ai_review_assessments a ON a.run_id=r.id AND a.finding_id=$2
+    WHERE r.scan_id=$1 ORDER BY r.created_at DESC LIMIT 1`, scanID, findingID).Scan(
+		&review.RunID, &review.Provider, &review.RunStatus, &review.ErrorCode, &created,
+		&review.Verdict, &review.Confidence, &review.Explanation, &review.Remediation, &review.Evidence)
+	if errors.Is(err, sql.ErrNoRows) {
+		if !eligible {
+			return aiFindingReview{State: "not_eligible"}, nil
+		}
+		return aiFindingReview{State: "not_requested"}, nil
+	}
+	if err != nil {
+		return aiFindingReview{}, err
+	}
+	review.At = &created
+	switch {
+	case review.Verdict != "":
+		review.State = "reviewed"
+	case !eligible:
+		review.State = "not_eligible"
+	case review.RunStatus == "queued" || review.RunStatus == "running":
+		review.State = review.RunStatus
+	case review.RunStatus == "failed" || review.RunStatus == "cancelled":
+		review.State = "failed"
+	default:
+		review.State = "not_reviewed"
+	}
+	return review, nil
+}
+
 var aiModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{1,99}$`)
 var aiCommitPattern = regexp.MustCompile(`^[a-fA-F0-9]{40,64}$`)
 var aiProviderTransport http.RoundTripper = http.DefaultTransport
@@ -63,8 +116,12 @@ func (s *Server) aiReviewSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var codexOnline bool
-	_ = s.DB.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM ai_review_worker_health WHERE provider='codex' AND last_seen_at>now()-interval '30 seconds')`).Scan(&codexOnline)
-	jsonOut(w, 200, map[string]any{"settings": cfg, "openai_key_configured": os.Getenv("PANBOX_OPENAI_API_KEY") != "", "anthropic_key_configured": os.Getenv("PANBOX_ANTHROPIC_API_KEY") != "", "codex_worker_online": codexOnline})
+	var codexAuth string
+	_ = s.DB.QueryRowContext(r.Context(), `SELECT auth_status,last_seen_at>now()-interval '30 seconds' FROM ai_review_worker_health WHERE provider='codex'`).Scan(&codexAuth, &codexOnline)
+	if !codexOnline {
+		codexAuth = "worker_offline"
+	}
+	jsonOut(w, 200, map[string]any{"settings": cfg, "openai_key_configured": os.Getenv("PANBOX_OPENAI_API_KEY") != "", "anthropic_key_configured": os.Getenv("PANBOX_ANTHROPIC_API_KEY") != "", "codex_worker_online": codexOnline, "codex_auth_status": codexAuth})
 }
 
 func (s *Server) putAIReviewSettings(w http.ResponseWriter, r *http.Request) {
@@ -232,13 +289,25 @@ func (s *Server) RunCodexReviewWorker(workerContext context.Context) {
 }
 
 func (s *Server) runAIReviewWorker(workerContext context.Context, codex bool) {
+	var codexReady atomic.Bool
 	if codex {
 		go func() {
 			ticker := time.NewTicker(10 * time.Second)
 			defer ticker.Stop()
+			lastAuthCheck := time.Time{}
 			for {
+				if time.Since(lastAuthCheck) >= 30*time.Second {
+					authCtx, stop := context.WithTimeout(workerContext, 10*time.Second)
+					codexReady.Store(CheckCodexChatGPTLogin(authCtx) == nil)
+					stop()
+					lastAuthCheck = time.Now()
+				}
+				status := "login_required"
+				if codexReady.Load() {
+					status = "ready"
+				}
 				pulseCtx, cancel := context.WithTimeout(workerContext, 3*time.Second)
-				_, _ = s.DB.ExecContext(pulseCtx, `INSERT INTO ai_review_worker_health(provider,last_seen_at) VALUES('codex',now()) ON CONFLICT(provider) DO UPDATE SET last_seen_at=now()`)
+				_, _ = s.DB.ExecContext(pulseCtx, `INSERT INTO ai_review_worker_health(provider,last_seen_at,auth_status,auth_checked_at) VALUES('codex',now(),$1,$2) ON CONFLICT(provider) DO UPDATE SET last_seen_at=now(),auth_status=$1,auth_checked_at=$2`, status, lastAuthCheck)
 				cancel()
 				select {
 				case <-workerContext.Done():
@@ -251,6 +320,14 @@ func (s *Server) runAIReviewWorker(workerContext context.Context, codex bool) {
 	for {
 		if workerContext.Err() != nil {
 			return
+		}
+		if codex && !codexReady.Load() {
+			select {
+			case <-workerContext.Done():
+				return
+			case <-time.After(3 * time.Second):
+				continue
+			}
 		}
 		deadline := 100 * time.Second
 		if codex {

@@ -329,6 +329,7 @@ func (s *Server) scans(w http.ResponseWriter, r *http.Request) {
 type findingRow struct {
 	ID, RepositoryID, Repository, Branch, Module, RuleID, Path, Message, Raw, Effective, Baseline, ScanID string
 	Status, SourceURL, ReferenceURL, Remediation                                                          string
+	AIState, AIVerdict                                                                                    string
 	Line                                                                                                  int
 	At                                                                                                    time.Time
 }
@@ -353,9 +354,18 @@ func (s *Server) findingRows(r *http.Request, activeOnly bool) ([]findingRow, er
   )
   SELECT x.id,x.repository_id,x.name,x.branch,x.module,x.rule_id,x.path,x.message,x.raw_severity,x.effective_severity,x.baseline_status,x.line,x.scan_id,x.created_at,
     CASE WHEN x.scan_id<>l.id THEN 'resolved' ELSE COALESCE(d.status,'open') END AS lifecycle,
-    x.commit_sha,x.provider,x.provider_project_id,x.scm_base_url
+    x.commit_sha,x.provider,x.provider_project_id,x.scm_base_url,
+    CASE WHEN x.scan_id<>l.id THEN 'historical'
+         WHEN aa.finding_id IS NOT NULL THEN 'reviewed'
+         WHEN x.module<>'vaccin' OR x.effective_severity NOT IN ('critical','high','medium') OR x.path='' OR x.line<=0 OR COALESCE(d.status,'open')<>'open' THEN 'not_eligible'
+         WHEN ar.id IS NULL THEN 'not_requested'
+         WHEN ar.status IN ('queued','running') THEN ar.status
+         WHEN ar.status IN ('failed','cancelled') THEN 'failed'
+         ELSE 'not_reviewed' END AS ai_state,COALESCE(aa.verdict,'') AS ai_verdict
   FROM seen x JOIN latest l ON l.repository_id=x.repository_id AND l.branch=x.branch AND l.module=x.module
   LEFT JOIN finding_dispositions d ON d.finding_id=x.id
+  LEFT JOIN LATERAL (SELECT id,status FROM ai_review_runs WHERE scan_id=x.scan_id ORDER BY created_at DESC LIMIT 1) ar ON true
+  LEFT JOIN ai_review_assessments aa ON aa.run_id=ar.id AND aa.finding_id=x.id
   WHERE ($1='' OR x.repository_id=$1) AND ($2='' OR x.branch=$2) AND ($3='' OR x.module=$3) AND ($4='' OR x.effective_severity=$4)
     AND (NOT $5 OR x.scan_id=l.id)
   ORDER BY x.created_at DESC LIMIT 1000`, repo, branch, module, severity, activeOnly)
@@ -367,7 +377,7 @@ func (s *Server) findingRows(r *http.Request, activeOnly bool) ([]findingRow, er
 	for rows.Next() {
 		var x findingRow
 		var commit, provider, project, baseURL string
-		err = rows.Scan(&x.ID, &x.RepositoryID, &x.Repository, &x.Branch, &x.Module, &x.RuleID, &x.Path, &x.Message, &x.Raw, &x.Effective, &x.Baseline, &x.Line, &x.ScanID, &x.At, &x.Status, &commit, &provider, &project, &baseURL)
+		err = rows.Scan(&x.ID, &x.RepositoryID, &x.Repository, &x.Branch, &x.Module, &x.RuleID, &x.Path, &x.Message, &x.Raw, &x.Effective, &x.Baseline, &x.Line, &x.ScanID, &x.At, &x.Status, &commit, &provider, &project, &baseURL, &x.AIState, &x.AIVerdict)
 		if err != nil {
 			return nil, err
 		}

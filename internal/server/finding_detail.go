@@ -235,6 +235,9 @@ func (s *Server) findingDetail(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	history := []map[string]any{}
 	status, source := "resolved", ""
+	var latestScanID, latestSeverity string
+	var latestLine int
+	var latestPresent bool
 	for rows.Next() {
 		var scanID, commit string
 		var at time.Time
@@ -246,6 +249,7 @@ func (s *Server) findingDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		present := raw.Valid
 		if len(history) == 0 {
+			latestScanID, latestSeverity, latestLine, latestPresent = scanID, effective.String, int(line.Int64), present
 			if present {
 				status = triage
 				source = findingSourceURL(provider, project, baseURL, commit, path, int(line.Int64))
@@ -253,12 +257,21 @@ func (s *Server) findingDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		history = append(history, map[string]any{"scan_id": scanID, "commit_sha": commit, "created_at": at, "detected": present, "line": line.Int64, "raw_severity": raw.String, "effective_severity": effective.String, "source_url": findingSourceURL(provider, project, baseURL, commit, path, int(line.Int64))})
 	}
+	if err := rows.Err(); err != nil {
+		fail(w, 500, "finding history unavailable")
+		return
+	}
 	if len(history) == 0 {
 		fail(w, 404, "finding has no complete scan on this branch")
 		return
 	}
+	aiReview, err := s.findingAIReview(r.Context(), latestScanID, id, module, latestSeverity, path, triage, latestLine, latestPresent)
+	if err != nil {
+		fail(w, 500, "finding AI status unavailable")
+		return
+	}
 	reference, remediation := findingGuidance(module, ruleID)
-	jsonOut(w, 200, map[string]any{"id": id, "repository_id": repo, "branch": branch, "module": module, "rule_id": ruleID, "path": path, "message": message, "status": status, "first_seen": firstSeen, "last_seen": lastSeen, "source_url": source, "reference_url": reference, "remediation": remediation, "history": history})
+	jsonOut(w, 200, map[string]any{"id": id, "repository_id": repo, "branch": branch, "module": module, "rule_id": ruleID, "path": path, "message": message, "status": status, "first_seen": firstSeen, "last_seen": lastSeen, "source_url": source, "reference_url": reference, "remediation": remediation, "history": history, "ai_review": aiReview})
 }
 
 func (s *Server) scanFindings(w http.ResponseWriter, r *http.Request) {
