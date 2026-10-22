@@ -9,6 +9,8 @@ User=panbox-ai
 Group=panbox-ai
 WorkingDirectory=/opt/panbox
 EnvironmentFile=/etc/panbox/ai-worker.env
+Environment=HOME=/var/lib/panbox-ai
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStart=/opt/panbox/panbox-ai-worker
 Restart=on-failure
 RestartSec=10
